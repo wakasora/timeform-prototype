@@ -1,0 +1,4713 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <title>TimeForm – 昨日の時間のかたち（1→2→2.5→3→4→メモ）</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;500;700&display=swap"4,700 rel="stylesheet">
+            <style>
+                :root{
+                    color-scheme: dark;
+                    --bg:#050509; --text:#f5f5f7; --muted:#8b9bb0;
+                    --accent-from:#f2f2f7; --accent-to:#c1c3d0;
+                    --band-stroke:rgba(255,255,255,.12);
+                    --container-max: 980px;
+                    --border-strong:rgba(255,255,255,.7);
+                    --border-soft:rgba(255,255,255,.35);
+                    --card-bg:rgba(0,0,0,.35);
+                    --input-bg:#050509;
+                }
+                
+                *{box-sizing:border-box}
+                html,body{margin:0;height:100%}
+                body{
+                    font-family:"Noto Sans JP",system-ui,-apple-system,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+                    font-weight:300; color:var(--text);
+                    background:radial-gradient(circle at 50% -10%, #141326 0, #070711 40%, #050509 70%, #030307 100%);
+                    overflow:hidden; position:relative;
+                }
+                
+                /* 背景 three.js */
+                #bundle-canvas{
+                    position:fixed; inset:0; width:100%; height:100%; display:block; z-index:0;
+                }
+                #veil{
+                    position:fixed; inset:0; pointer-events:none; z-index:1;
+                    background:radial-gradient(circle at 50% -10%, rgba(0,0,0,.10), rgba(0,0,0,.70));
+                }
+                
+                /* 背景は完全にクリック透過 */
+                #bundle-canvas,
+                #veil{
+                    pointer-events: none !important;
+                }
+                
+                /* 画面レイヤ共通 */
+                .screen{
+                    position:fixed; inset:0; z-index:2;
+                    display:flex; align-items:center; justify-content:center;
+                    opacity:0; transform:translateY(8px); pointer-events:none;
+                    transition:opacity .45s ease, transform .60s cubic-bezier(.2,.8,.2,1);
+                    padding:24px;
+                }
+                body.mode-intro    .screen--intro,
+                body.mode-timeline .screen--timeline,
+                body.mode-announce .screen--announce,
+                body.mode-params   .screen--params,
+                body.mode-complete .screen--complete,
+                body.mode-memo     .screen--memo,
+                body.mode-gallery  .screen--gallery {
+                    opacity:1; transform:none; pointer-events:auto;
+                }
+                body.mode-admin .screen--admin{
+                  opacity:1;
+                  transform:none;
+                  pointer-events:auto;
+                }
+
+                /* params画面のボタンを最前面に */
+                body.mode-params .screen--params .footer{
+                    position: relative;
+                    z-index: 10;
+                }
+                
+                /* redo-link はその下に落とす（または z-index を下げる） */
+                body.mode-params .screen--params .redo-link{
+                    z-index: 5;
+                }
+                
+                body{
+                    position: relative;
+                    isolation: isolate; /* ← これ超効く */
+                }
+                .screen{
+                    z-index: 10; /* UIを確実に上へ */
+                }
+                #bundle-canvas{ z-index: 0; }
+                #veil{ z-index: 1; }
+                /* ===== 背景の出し入れ：displayではなくopacityで ===== */
+                #bundle-canvas,
+                #veil{
+                  opacity: 1;
+                  transition: opacity .55s ease;
+                }
+
+                /* complete/memo/galleryでは背景を少しだけ薄く（暗転じゃない） */
+                body.bg-dim #bundle-canvas{ opacity: .18; }
+                body.bg-dim #veil{ opacity: .55; } /* ベールも薄めたいなら */
+
+                /* 見出し（共通） */
+                .hero-title{
+                    font-size:30px; font-weight:500; letter-spacing:.03em; margin:0; text-align:center;
+                    text-shadow:0 0 18px rgba(0,0,0,.8), 0 0 36px rgba(0,0,0,.8); line-height:1.45;
+                }
+                .hero-title .l1,.hero-title .l2{ display:block; white-space:nowrap; }
+                .hero-sub{
+                    margin:14px 0 0; font-size:14px; line-height:1.7; color:var(--muted);
+                    text-align:center; text-shadow:0 0 14px rgba(0,0,0,.9), 0 0 30px rgba(0,0,0,.9);
+                }
+                
+                .actions{ display:flex; justify-content:center; gap:12px; margin-top:20px; }
+                
+                /* イントロのボタンは縦積み（長い文言でも崩れない） */
+                .screen--intro .actions{
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .screen--intro .actions .btn{
+                    min-width: 320px;
+                    max-width: 420px;
+                    width: clamp(280px, 60vw, 420px);
+                }
+                
+                /* サブボタン：輪郭＋薄い発光だけ（主張しすぎない） */
+                .btn.btn--ghost{
+                    background: transparent;
+                    color: var(--text);
+                    border: 1px solid rgba(245,245,247,.28);
+                    box-shadow: none;
+                    opacity: .86;
+                }
+                .btn.btn--ghost:hover{
+                    opacity: 1;
+                    transform: translateY(-1px);
+                    box-shadow: 0 0 0 1px rgba(245,245,247,.18), 0 10px 28px rgba(0,0,0,.65);
+                }
+                .btn.btn--ghost:active{
+                    transform: translateY(0px);
+                }
+                
+                .btn{
+                    border-radius:999px; border:none; font-size:14px; font-weight:500;
+                    padding:11px 28px; cursor:pointer; color:#050509;
+                    background-image:linear-gradient(135deg,var(--accent-from),var(--accent-to));
+                    box-shadow:0 2px 10px rgba(0,0,0,.65), 0 0 16px rgba(255,255,255,.35);
+                    transition: transform .08s ease, box-shadow .12s ease, opacity .12s ease;
+                    opacity:.96;
+                }
+                .btn:hover{
+                    transform:translateY(-1px); opacity:1;
+                    box-shadow:0 4px 16px rgba(0,0,0,.8), 0 0 22px rgba(255,255,255,.55)
+                }
+                .btn:disabled{ opacity:.45; cursor:not-allowed; }
+                
+                /* 1: イントロ */
+                .intro-inner{ text-align:center; max-width:720px; padding:0 16px; }
+                
+                /* 2: 場面分け */
+                .wrap{
+                    width:100%; max-width:var(--container-max);
+                    padding-inline:min(5vw,48px);
+                    display:flex; flex-direction:column;
+                    align-items:center; gap:14px;
+                }
+                .title{
+                    margin:0; font-weight:500; font-size:28px; line-height:1.25; letter-spacing:.02em; text-align:center;
+                    text-shadow:0 0 18px rgba(0,0,0,.85), 0 0 36px rgba(0,0,0,.85);
+                }
+                .sub{
+                    color:var(--muted); font-size:13px; line-height:1.7; text-align:center;
+                    text-shadow:0 0 14px rgba(0,0,0,.9), 0 0 30px rgba(0,0,0,.9);
+                    max-width:820px; margin:0 0 6px;
+                }
+                
+                .knob{ transform-box: fill-box; transform-origin:50% 100%; cursor:grab; }
+                .knob.drag{ filter:brightness(1.03); cursor:grabbing; }
+                .knob.pop{ animation: pop 320ms cubic-bezier(.2,1.4,.3,1); }
+                @keyframes pop{ 0%{transform:scaleY(.7)} 60%{transform:scaleY(1.06)} 100%{transform:scaleY(1)} }
+                .ring{ transform-box:fill-box; transform-origin:50% 50%; }
+                .ring.breath{ animation: breath 900ms ease-in-out infinite alternate; }
+                @keyframes breath{
+                    from{ transform:scale(1); opacity:.38; }
+                    to{   transform:scale(1.05); opacity:.65; }
+                }
+                .shake{ animation: shake 160ms ease-in-out 1; }
+                @keyframes shake{
+                    0%{transform:translateX(0)}
+                    30%{transform:translateX(-1.6px)}
+                    60%{transform:translateX(1.6px)}
+                    100%{transform:translateX(0)}
+                }
+                @media (prefers-reduced-motion: reduce){
+                    .screen{transition:none}
+                    .ring.breath,.knob.pop,.shake{animation:none}
+                }
+                
+                /* 2.5: 予告だけ（3秒） */
+                .announce-inner{ text-align:center; padding:0 16px; }
+                .announce-inner h1{
+                    font-size:30px; font-weight:500; letter-spacing:.03em; margin:0;
+                    text-shadow:0 0 18px rgba(0,0,0,.85), 0 0 36px rgba(0,0,0,.85);
+                }
+                
+                /* 3: パラメータ入力 */
+                .params-wrap{
+                    width:100%; max-width:var(--container-max);
+                    display:flex; flex-direction:column; align-items:center;
+                }
+                .bandWrap{ position:relative; width:74%; margin-top:34px; }
+                .scene-counter{
+                    position:absolute; top:-36px; left:50%; transform:translateX(-50%);
+                    font-size:20px; font-weight:500; letter-spacing:.02em;
+                }
+                .band{ width:100%; height:32px; }
+                .band svg{ width:100%; height:100%; display:block; }
+                .seg{ fill:rgba(255,255,255,.16); stroke:var(--band-stroke); stroke-width:1; }
+                .seg--current{ fill:rgba(255,255,255,.96); }
+                
+                .sliders{
+                    width:130%; margin-top:10px;
+                    display:flex; flex-direction:column; align-items:center; gap:6px;
+                }
+                .row{ width:68%; position:relative; padding-top:18px; }
+                .label{
+                    position:absolute; left:50%; transform:translateX(-50%);
+                    top:-2px; margin:0; text-align:center;
+                    font-size:17px; font-weight:500; letter-spacing:.02em;
+                    text-shadow:0 0 14px rgba(0,0,0,.9), 0 0 30px rgba(0,0,0,.9);
+                }
+                .range{
+                    -webkit-appearance:none; appearance:none;
+                    width:100%; height:4px; border-radius:999px;
+                    background:#e9ebf3; outline:none;
+                    box-shadow:inset 0 0 0 1px rgba(0,0,0,.15);
+                }
+                .range::-webkit-slider-thumb{
+                    -webkit-appearance:none; appearance:none;
+                    width:14px; height:14px; border-radius:50%;
+                    background:#fff; border:1px solid #b7bbca;
+                    box-shadow:0 0 0 3px rgba(255,255,255,.16); cursor:pointer;
+                }
+                .tips{
+                    display:flex; justify-content:space-between;
+                    margin-top:4px; font-size:12px; color:var(--muted);
+                }
+                
+                .footer{
+                    width:100%;
+                    display:flex; align-items:center; justify-content:space-between;
+                    gap:12px; margin-top:14px;
+                }
+                .redo-link{
+                    position:fixed; left:50%; bottom:36px; transform:translateX(-50%);
+                    z-index:3;
+                    font-size:13px; color:var(--muted);
+                    background:transparent; border:none; cursor:pointer;
+                    text-shadow:0 0 14px rgba(0,0,0,.9), 0 0 30px rgba(0,0,0,.9);
+                }
+                
+                /* 4: 完成画面 */
+                .screen--complete{
+                    flex-direction:column;
+                }
+                body.mode-complete .screen--complete{
+                    opacity:1; transform:none; pointer-events:auto;
+                }
+                .complete-inner{
+                    width:100%;
+                    max-width:none;
+                    margin:0 auto;
+                    display:flex;
+                    flex-direction:column;
+                    align-items:center;
+                    gap:32px;
+                }
+                .bundle-frame{
+                    width:100%;
+                    max-width:none;
+                    height: min(70vh, 520px);
+                    border-radius:0;
+                    background:transparent;
+                    box-shadow:none;
+                    overflow:visible;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                }
+                #result-canvas{
+                    width:100%;
+                    height:100%;
+                    display:block;
+                    cursor:grab;
+                }
+                #result-canvas.dragging{ cursor:grabbing; }
+                
+                .complete-title{
+                    margin:0;
+                    font-size:26px; font-weight:500; letter-spacing:.04em;
+                    text-align:center;
+                    text-shadow:0 0 18px rgba(0,0,0,.9),0 0 36px rgba(0,0,0,.9);
+                }
+                .complete-sub{
+                    margin:0;
+                    font-size:14px; color:var(--muted); text-align:center;
+                    text-shadow:0 0 14px rgba(0,0,0,.9),0 0 30px rgba(0,0,0,.9);
+                }
+                
+                .complete-actions{
+                    display:flex; flex-direction:column;
+                    align-items:center; gap:12px; margin-top:4px;
+                }
+                .btn-primary{ min-width:180px; }
+                .link-btn{
+                    border:none; background:transparent;
+                    color:var(--muted); font-size:13px; cursor:pointer;
+                    text-decoration:underline; text-underline-offset:3px;
+                }
+                .link-btn:hover{ color:#ffffff; }
+                
+                /* リセット確認モーダル */
+                .modal-backdrop{
+                    position:fixed; inset:0;
+                    background:rgba(3,3,8,.7);
+                    display:flex; align-items:center; justify-content:center;
+                    z-index:4;
+                }
+                .modal{
+                    width:90%; max-width:420px;
+                    background:#101119;
+                    border-radius:16px;
+                    padding:22px 24px 18px;
+                    box-shadow:0 24px 60px rgba(0,0,0,.85);
+                }
+                .modal p{ margin:0 0 18px; font-size:14px; line-height:1.7; }
+                .modal-actions{ display:flex; justify-content:flex-end; gap:8px; }
+                .btn-ghost{
+                    background:transparent; color:var(--text);
+                    box-shadow:none; border:1px solid rgba(255,255,255,.24);
+                }
+                .btn-ghost:hover{
+                    background:rgba(255,255,255,.06); box-shadow:none;
+                }
+                
+                /* 5: 断片メモ画面 */
+                .memo-shell{
+                    width:100%;
+                    max-width:1280px;
+                    padding:96px 72px 64px;
+                    display:flex;
+                    flex-direction:column;
+                    gap:40px;
+                }
+                .memo-main{
+                    position:relative;
+                    display:flex;
+                    gap:72px;
+                    align-items:flex-start;
+                }
+                .memo-left{
+                    flex:1.1;
+                    min-width:0;
+                }
+                .memo-right{
+                    flex:1;
+                    min-width:0;
+                    margin-left:24px;
+                }
+                .memo-title{
+                    margin:0 0 18px;
+                    font-size:32px;
+                    line-height:1.4;
+                    font-weight:500;
+                }
+                .memo-lead{
+                    margin:0 0 12px;
+                    font-size:18px;
+                    line-height:1.8;
+                    font-weight:300;
+                }
+                .memo-note{
+                    margin:0;
+                    font-size:13px;
+                    line-height:1.8;
+                    color:var(--muted);
+                }
+                /* 箱は “サイズ確保” のためだけに残す。見た目は消す */
+                .bundle-preview{
+                    margin-top:56px;
+                    
+                    /* でかく、横長に。右カラムより主役にする */
+                    width: 120%;
+                    max-width: 540px;
+                    
+                    /* 高さもちゃんと稼ぐ（今が小さい原因の8割ここ） */
+                    aspect-ratio: 17 / 4;
+                    
+                    border:none;
+                    background:transparent;
+                    box-shadow:none;
+                    overflow:visible;
+                    display:block;
+                    position:relative;
+                    
+                    /* 左に攻める（これが「控えめすぎ」解決） */
+                    transform: translateX(-10%);
+                }
+                
+                
+                /* ここに opacity があると canvas も薄くなるので消す */
+                .bundle-preview-inner{
+                    width:100%;
+                    height:100%;
+                    background:transparent;
+                    opacity:1;
+                    position:relative;
+                }
+                
+                /* キャンバスを箱サイズにフィットさせる（ここ超重要） */
+                #memoBundleCanvas{
+                    width:100%;
+                    height:100%;
+                    display:block;
+                    
+                    /* “浮いてる感じ” */
+                    filter:
+                    drop-shadow(0 18px 35px rgba(0,0,0,.55))
+                    drop-shadow(0 0 18px rgba(144,160,255,.18));
+                }
+                
+                .memo-lines{
+                    position:absolute;
+                    inset:0;
+                    pointer-events:none;
+                }
+                .memo-lines path{
+                    fill:none;
+                    stroke:rgba(255,255,255,.45);
+                    stroke-width:0.7;
+                    stroke-linecap:round;
+                    stroke-dasharray:1.4 4;
+                }
+                .memo-list{
+                    margin-top:24px;
+                    display:flex;
+                    flex-direction:column;
+                    gap:26px;
+                }
+                .memo-card{
+                    border-radius:32px;
+                    border:1px solid var(--border-soft);
+                    padding:18px 22px 16px;
+                    background:var(--card-bg);
+                }
+                .memo-label{
+                    margin:0 0 10px;
+                    font-size:15px;
+                    font-weight:500;
+                }
+                .memo-input-shell{
+                    border-radius:999px;
+                    border:1px solid var(--border-soft);
+                    padding:10px 18px;
+                    background:var(--input-bg);
+                    display:flex;
+                    align-items:center;
+                }
+                .memo-input-shell:focus-within{
+                    border-color:var(--border-strong);
+                    box-shadow:0 0 0 1px rgba(255,255,255,.25);
+                }
+                .memo-input{
+                    width:100%;
+                    border:none;
+                    outline:none;
+                    background:transparent;
+                    color:var(--text);
+                    font-size:14px;
+                    font-weight:300;
+                }
+                .memo-input::placeholder{
+                    color:var(--muted);
+                    opacity:.45;
+                }
+                .memo-footer{
+                    margin-top:28px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:space-between;
+                    gap:16px;
+                }
+                .skip-link{
+                    border:none; padding:0;
+                    background:transparent;
+                    color:var(--muted);
+                    font-size:13px;
+                    cursor:pointer;
+                }
+                .skip-link:hover{ color:#ffffff; }
+                .primary-btn{
+                    border:none;
+                    border-radius:999px;
+                    min-width:260px;
+                    padding:15px 32px;
+                    font-size:15px;
+                    font-weight:500;
+                    cursor:pointer;
+                    background:#f5f5f7;
+                    color:#050509;
+                    transition:filter .12s ease, opacity .12s ease;
+                }
+                .primary-btn:hover:not(:disabled){
+                    filter:brightness(1.05);
+                }
+                .primary-btn:disabled{
+                    opacity:.25; cursor:not-allowed;
+                }
+                
+                @media (max-width:960px){
+                    .memo-shell{ padding:40px 20px 32px; }
+                    .memo-main{ flex-direction:column; gap:32px; }
+                    .bundle-preview{ max-width:none; }
+                    .memo-footer{ flex-direction:column; align-items:flex-start; }
+                    .primary-btn{ align-self:flex-end; }
+                    .memo-lines{ display:none; }
+                }
+                /* ===== 4: 完成画面：段階演出 ===== */
+                
+                /* 初期状態：全部隠す */
+                .screen--complete .bundle-frame,
+                .screen--complete .complete-copy,
+                .screen--complete .complete-actions{
+                    opacity: 0;
+                    transform: translateY(10px);
+                    filter: blur(2px);
+                    transition:
+                    opacity .9s cubic-bezier(.2,.8,.2,1),
+                    transform .9s cubic-bezier(.2,.8,.2,1),
+                    filter .9s ease;
+                    will-change: opacity, transform, filter;
+                }
+                
+                /* 束だけ先に出す（phase1） */
+                body.mode-complete.complete-phase1 .screen--complete .bundle-frame{
+                    opacity: 1;
+                    transform: none;
+                    filter: blur(0);
+                }
+                
+                /* 文言（copy）を次に出す（phase2） */
+                body.mode-complete.complete-phase2 .screen--complete .complete-copy{
+                    opacity: 1;
+                    transform: none;
+                    filter: blur(0);
+                    transition-delay: .10s;
+                }
+                
+                /* ボタンを最後に出す（phase3） */
+                body.mode-complete.complete-phase3 .screen--complete .complete-actions{
+                    opacity: 1;
+                    transform: none;
+                    filter: blur(0);
+                    transition-delay: .12s;
+                }
+                
+                /* ===== 6: ギャラリー（枠なし・上下積み・大きめ） ===== */
+                :root{
+                    --topbar-h: 110px;
+                    --shell-max: 1480px;
+                    --shell-pad-x: 56px;
+                    --shell-pad-top: 18px;
+                    --shell-pad-bottom: 64px;
+                    
+                    --rail-w: 240px;
+                    --rail-gap: 32px;
+                    
+                    --left-col: 240px; /* 左のテキスト幅 */
+                }
+                
+                /* gallery画面 */
+                body.mode-gallery .screen--gallery{
+                    align-items: stretch;
+                    justify-content: flex-start;
+                    flex-direction: column;
+                    padding: 0;
+                }
+                
+                /* 上の帯（そのまま） */
+                .gallery-topbar{
+                    position: sticky;
+                    top: 0;
+                    z-index: 20;
+                    height: var(--topbar-h);
+                    display:flex;
+                    align-items:flex-end;
+                    justify-content:space-between;
+                    padding: 0 26px 18px;
+                    background: rgba(0,0,0,.34);
+                    border-bottom: 1px solid rgba(255,255,255,.12);
+                    backdrop-filter: blur(12px);
+                }
+                
+                .gallery-shell{
+                    width: min(var(--shell-max), 100%);
+                    margin: 0 auto;
+                    padding: var(--shell-pad-top) var(--shell-pad-x) var(--shell-pad-bottom);
+                    
+                    display: grid;
+                    grid-template-columns: 1fr var(--rail-w);
+                    column-gap: var(--rail-gap);
+                    
+                    min-height: calc(100vh - var(--topbar-h) - var(--shell-pad-top) - var(--shell-pad-bottom));
+                }
+                
+                /* 左側：上下積みのスタック */
+                .g-stack{
+                    align-self: center;          /* 2ブロックを縦中央寄せ（不要なら消してOK） */
+                    width: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 26px;
+                }
+                
+                /* 枠なしブロック（= g-panelの代わり） */
+                .g-block{
+                    width: 100%;
+                    display: grid;
+                    grid-template-columns: var(--left-col) 1fr;
+                    gap: 28px;
+                    align-items: center;
+                    
+                    /* 枠/背景を消す */
+                    border: none;
+                    background: transparent;
+                    padding: 0;
+                    min-height: unset;
+                }
+                
+                /* ブロック間の薄い区切り線 */
+                .g-divider{
+                    height: 1px;
+                    background: rgba(255,255,255,.22);
+                    width: 100%;
+                    opacity: .55;
+                }
+                
+                /* 左の見出し＆テキスト */
+                .g-head{
+                    display:flex;
+                    flex-direction: column;
+                    gap: 8px;
+                    margin: 0 0 14px;
+                }
+                
+                .g-label{
+                    font-size: 12px;
+                    font-weight: 300;
+                    letter-spacing: .08em;
+                    color: rgba(255,255,255,.78);
+                    text-shadow: 0 0 16px rgba(0,0,0,.65);
+                }
+                
+                .g-meta{
+                    font-size: 12px;
+                    font-weight: 300;
+                    color: rgba(255,255,255,.40);
+                }
+                
+                .g-info{
+                    display:flex;
+                    flex-direction:column;
+                    gap: 10px;
+                }
+                
+                .g-line{
+                    font-size: 13px;
+                    font-weight: 300;
+                    color: rgba(255,255,255,.78);
+                    text-shadow: 0 0 16px rgba(0,0,0,.55);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                
+                /* ✅ 束を大きく */
+                .g-stage{
+                    width: 100%;
+                    aspect-ratio: 17 / 4;
+                    height: auto;
+                    
+                    /* ここを上げるほどデカくなる */
+                    max-height: 320px;
+                    min-height: 220px;
+                    
+                    border-radius: 18px;
+                    overflow: hidden;
+                    background: transparent;
+                }
+                
+                .g-stage--big{
+                    max-height: 360px;
+                    min-height: 240px;
+                }
+                
+                #galleryYourCanvas,
+                #galleryAllCanvas,
+                #rightStreamCanvas{
+                    width:100%;
+                    height:100%;
+                    display:block;
+                }
+                
+                /* 右レールは今のままでOK（あなたの既存定義を維持） */
+                
+                /* ===== responsive ===== */
+                @media (max-width: 960px){
+                    :root{
+                        --topbar-h: 92px;
+                        --shell-pad-x: 20px;
+                        --shell-pad-top: 14px;
+                        --shell-pad-bottom: 32px;
+                        
+                        --rail-w: 100%;
+                        --rail-gap: 18px;
+                        
+                        --left-col: 1fr;
+                    }
+                    
+                    .gallery-shell{
+                        width: 100%;
+                        grid-template-columns: 1fr;
+                    }
+                    
+                    .g-block{
+                        grid-template-columns: 1fr;  /* モバイルは縦積み（テキスト→束） */
+                        gap: 14px;
+                        align-items: start;
+                    }
+                    
+                    .g-stage--big{
+                        max-height: 320px;
+                        min-height: 220px;
+                    }
+                    
+                    .right-rail{
+                        position: relative;
+                        top: auto;
+                        height: 260px;
+                        width: 100%;
+                        margin-top: 18px;
+                        border-left: none;
+                        border-top: 1px solid rgba(255,255,255,.10);
+                    }
+                }
+                /* ===== responsive ===== */
+                @media (max-width: 960px){
+                    :root{
+                        --topbar-h: 92px;
+                        --shell-pad-x: 20px;
+                        --shell-pad-top: 14px;
+                        --shell-pad-bottom: 32px;
+                        
+                        --rail-w: 100%;
+                        --rail-gap: 18px;
+                    }
+                    
+                    .gallery-topbar{
+                        padding: 0 18px 14px;
+                    }
+                    
+                    .gallery-shell{
+                        width: 100%;
+                        grid-template-columns: 1fr;
+                    }
+                    
+                    .g-grid{
+                        grid-template-columns: 1fr;
+                    }
+                    .g-grid{
+                        align-self: center;
+                    }
+                    
+                    .g-stage{
+                        max-height: 240px;  /* モバイルは少し大きくしてOK */
+                    }
+                    
+                    /* パネル中身：左=形 / 右=テキスト */
+                    .g-body{
+                        display:grid;
+                        grid-template-columns: 1fr 220px;   /* ←右側の文字カラム */
+                        gap: 22px;
+                        align-items:center;
+                    }
+                    
+                    /* 形ステージ：縦も稼ぐ */
+                    .g-stage{
+                        width:100%;
+                        aspect-ratio: 17 / 4;
+                        max-height: 260px;                 /* ← 少し上げる */
+                        border-radius: 18px;
+                        overflow:hidden;
+                        background: transparent;
+                    }
+                    
+                    /* 右側テキスト：縦積み・右揃え */
+                    .g-info{
+                        display:flex;
+                        flex-direction:column;
+                        gap: 14px;
+                        text-align:right;
+                        align-self:stretch;
+                        justify-content:flex-end;           /* ← 下寄せにしたいなら */
+                        padding-bottom: 6px;
+                    }
+                    
+                    .g-line{
+                        display:flex;
+                        justify-content:flex-end;
+                        gap: 14px;
+                    }
+                    
+                    .g-k{
+                        font-size:12px;
+                        font-weight:300;
+                        letter-spacing:.06em;
+                        color: rgba(255,255,255,.32);
+                        min-width: 4.5em;                   /* ← ラベル列の幅を固定 */
+                        text-align:right;
+                    }
+                    
+                    .g-v{
+                        font-size:13px;
+                        font-weight:300;
+                        color: rgba(255,255,255,.70);
+                        max-width: 220px;
+                        overflow:hidden;
+                        text-overflow:ellipsis;
+                        white-space:nowrap;
+                    }
+                    
+                    .right-rail{
+                        position: relative;
+                        top: auto;
+                        height: 260px;
+                        width: 100%;
+                        margin-top: 18px;
+                        border-left: none;
+                        border-top: 1px solid rgba(255,255,255,.10);
+                    }
+                }
+                /* ヘッダ：縦積み左寄せ */
+                .g-head{
+                    display:flex;
+                    flex-direction:column;
+                    align-items:flex-start;
+                    gap:6px;
+                    margin-bottom:10px;
+                }
+                
+                /* 文字の統一 */
+                .g-label,
+                .g-meta,
+                .g-line{
+                    font-size:12px;
+                    font-weight:300;
+                    letter-spacing:.04em;
+                    color: rgba(255,255,255,.72);
+                    text-shadow: 0 0 16px rgba(0,0,0,.65);
+                }
+                
+                /* パネル中身：上に束、下にテキスト（＝写真の順番） */
+                .g-body{
+                    display:flex;
+                    flex-direction:column;
+                    gap:18px;
+                }
+                
+                /* 束の枠（今まで通りでOK） */
+                .g-stage{
+                    width:100%;
+                    aspect-ratio: 17 / 4;
+                    max-height: 200px;
+                    border-radius: 18px;
+                    overflow:hidden;
+                    background: transparent;
+                }
+                
+                /* 下のテキスト：縦に並べるだけ */
+                .g-info{
+                    display:flex;
+                    flex-direction:column;
+                    align-items:flex-start;
+                    gap:10px;
+                }
+                
+                .g-line{
+                    white-space:nowrap;
+                    overflow:hidden;
+                    text-overflow:ellipsis;
+                    width:100%;
+                }
+                /* =========================================================
+                   TimeForm UI: Type + Button System v2 (drop-in override)
+                   要望反映：幅短め / 見出し統一 / 「完成！」色替え / 1/1中央寄せ
+                   / モーダルhover黒化修正 / remake UI統一
+                   ========================================================= */
+
+                :root{
+                  /* ---- type scale ---- */
+                  --fs-head: 28px;        /* 見出しはこれに統一 */
+                  --fs-body: 15px;
+                  --fs-small: 13px;
+
+                  --lh-head: 1.45;
+                  --lh-base: 1.7;
+
+                  /* ---- buttons ---- */
+                  --btn-h: 44px;
+                  --btn-pad-x: 14px;      /* 横幅を短くする主因 */
+                  --btn-min: 112px;       /* デフォルト最小幅（短め） */
+                  --btn-radius: 999px;
+
+                  /* ---- accents ---- */
+                  --btn-primary-from: var(--accent-from);
+                  --btn-primary-to:   var(--accent-to);
+
+                  /* 「完成！」専用の色（ちょい青） */
+                  --btn-done-from: #cfd7ff;
+                  --btn-done-to:   #8ea2ff;
+
+                  /* link */
+                  --link: rgba(245,245,247,.62);
+                  --link-hover: #ffffff;
+                }
+
+                /* base */
+                body{
+                  font-size: var(--fs-body);
+                  line-height: var(--lh-base);
+                }
+
+                /* =========================
+                   見出しサイズ：統一
+                   ========================= */
+                .hero-title,
+                .title,
+                .announce-inner h1,
+                .complete-title{
+                  font-size: var(--fs-head) !important;
+                  line-height: var(--lh-head) !important;
+                  font-weight: 500 !important;
+                  letter-spacing: .02em !important;
+                }
+
+                /* 補助テキスト */
+                .hero-sub,
+                .sub,
+                .complete-sub{
+                  font-size: var(--fs-small) !important;
+                  line-height: var(--lh-base) !important;
+                }
+
+                /* スライダーのラベル */
+                .label{
+                  font-size: var(--fs-body) !important;
+                  font-weight: 500 !important;
+                }
+                .tips{ font-size: var(--fs-small) !important; }
+
+                /* =========================
+                   ボタン：デフォルト横幅を短く
+                   ========================= */
+                .btn{
+                  height: var(--btn-h);
+                  min-width: var(--btn-min);
+                  padding: 0 var(--btn-pad-x);
+
+                  border-radius: var(--btn-radius);
+                  border: 1px solid transparent;
+
+                  display:inline-flex;
+                  align-items:center;
+                  justify-content:center;
+
+                  font-size: var(--fs-body);
+                  font-weight: 500;
+                  line-height: 1;
+
+                  cursor:pointer;
+                  user-select:none;
+
+                  color:#050509;
+                  background-image: linear-gradient(135deg,var(--btn-primary-from),var(--btn-primary-to));
+                  box-shadow: 0 2px 10px rgba(0,0,0,.65), 0 0 16px rgba(255,255,255,.35);
+                  transition: transform .08s ease, box-shadow .12s ease, opacity .12s ease, filter .12s ease;
+                  opacity:.96;
+                  white-space:nowrap;
+                }
+                .btn:hover{
+                  transform: translateY(-1px);
+                  opacity: 1;
+                  box-shadow: 0 4px 16px rgba(0,0,0,.80), 0 0 22px rgba(255,255,255,.55);
+                }
+                .btn:active{ transform: translateY(0px); }
+                .btn:disabled{ opacity:.45; cursor:not-allowed; }
+
+                /* intro：縦積みは維持しつつ少し細く */
+                .screen--intro .actions .btn{
+                  min-width: 260px !important;
+                  width: clamp(240px, 52vw, 360px) !important;
+                }
+
+                /* ghost（透明） */
+                .btn.btn--ghost,
+                .btn-ghost{
+                  background: transparent !important;
+                  color: var(--text) !important;
+                  border-color: rgba(245,245,247,.22) !important;
+                  box-shadow: none !important;
+                  opacity: .86;
+                }
+                .btn.btn--ghost:hover,
+                .btn-ghost:hover{
+                  opacity: 1;
+                  transform: translateY(-1px);
+                  border-color: rgba(245,245,247,.38) !important;
+
+                  /* “真っ黒”化を防ぐ：背景を足さない */
+                  background: transparent !important;
+                  box-shadow: 0 0 0 1px rgba(245,245,247,.10), 0 10px 28px rgba(0,0,0,.55) !important;
+                }
+                .btn.btn--ghost:active,
+                .btn-ghost:active{
+                  transform: translateY(0px);
+                }
+
+                /* =========================
+                   リンクUI統一
+                   - 完成の「もう一度作り直す」
+                   - paramsの「場面の分け方をやり直す」
+                   ========================= */
+                .link-btn,
+                .redo-link{
+                  border: none !important;
+                  background: transparent !important;
+                  color: var(--link) !important;
+                  font-size: var(--fs-small) !important;
+                  cursor: pointer;
+                  text-decoration: underline;
+                  text-underline-offset: 3px;
+                }
+                .link-btn:hover,
+                .redo-link:hover{
+                  color: var(--link-hover) !important;
+                }
+                .redo-link{ padding: 0 !important; }
+
+                /* =========================
+                   ✅「完成！」ボタンだけ色替え
+                   - params画面の nextScene が最後の場面のとき
+                   - 1/1 のとき（single-scene）も同様
+                   ========================= */
+                body.mode-params.is-last-scene #nextScene,
+                body.single-scene.mode-params #nextScene{
+                  background-image: linear-gradient(135deg,var(--btn-done-from),var(--btn-done-to)) !important;
+                  box-shadow: 0 2px 12px rgba(0,0,0,.65), 0 0 18px rgba(142,162,255,.35) !important;
+                }
+
+                /* 1/1 のときは中央寄せ + prev隠す */
+                body.single-scene.mode-params .footer{
+                  justify-content: center !important;
+                }
+                body.single-scene.mode-params #prevScene{
+                  display: none !important;
+                }
+                body.single-scene.mode-params #nextScene{
+                  min-width: 180px !important;
+                }
+
+                /* （最後の場面でも次ボタンは少しだけ幅確保） */
+                body.mode-params.is-last-scene #nextScene{
+                  min-width: 180px !important;
+                }
+
+                /* =========================
+                   ❌ 記録する(#btn-record)は普通に戻す
+                   ここで“上書き解除”しておく（念のため）
+                   ========================= */
+                #btn-record{
+                  background-image: linear-gradient(135deg,var(--btn-primary-from),var(--btn-primary-to)) !important;
+                  box-shadow: 0 2px 10px rgba(0,0,0,.65), 0 0 16px rgba(255,255,255,.35) !important;
+                  min-width: 180px !important;
+                }
+
+                /* =========================
+                   timeline：2ボタン同幅（見た目が揃う）
+                   ========================= */
+                body.mode-timeline .actions{
+                  width: 100%;
+                  max-width: 560px !important;
+                }
+                body.mode-timeline .actions .btn{
+                  flex: 1;
+                  min-width: 0;
+                }
+
+                /* params：前/次 も同幅。幅は少し絞る */
+                body.mode-params .footer{
+                  width: min(560px, 100%) !important;
+                  margin-inline: auto;
+                }
+                body.mode-params .footer .btn{
+                  flex: 1;
+                  min-width: 0;
+                }
+
+                /* =========================
+                   memoの primary-btn も btnと統一
+                   ========================= */
+                .primary-btn{
+                  height: var(--btn-h) !important;
+                  border-radius: var(--btn-radius) !important;
+                  padding: 0 22px !important;
+                  min-width: 220px !important;
+                  font-size: var(--fs-body) !important;
+                  font-weight: 500 !important;
+
+                  color:#050509 !important;
+                  background-image: linear-gradient(135deg,var(--btn-primary-from),var(--btn-primary-to)) !important;
+                  box-shadow: 0 2px 10px rgba(0,0,0,.65), 0 0 16px rgba(255,255,255,.35) !important;
+                }
+                .primary-btn:hover:not(:disabled){
+                  transform: translateY(-1px);
+                  filter: none !important;
+                  box-shadow: 0 4px 16px rgba(0,0,0,.80), 0 0 22px rgba(255,255,255,.55) !important;
+                }
+                .primary-btn:disabled{ opacity:.25; cursor:not-allowed; }
+                /* 1/1 のとき：ボタンを横に伸ばさず、普通の幅に戻す */
+                body.single-scene.mode-params .footer .btn{
+                  flex: 0 0 auto !important;
+                }
+
+                /* 1/1 のとき：完成ボタンの最小幅もデフォに戻す（念のため） */
+                body.single-scene.mode-params #nextScene{
+                  min-width: var(--btn-min) !important;
+                }
+                /* =========================================================
+                   TimeForm UI: Button Width UNIFY (横幅統一・最優先)
+                   - 全ボタンを “同じ横幅” に固定
+                   - 画面ごとの min-width / clamp / flex:1 を全部無効化
+                   ========================================================= */
+
+                :root{
+                  /* 共通のボタン幅：ここだけ触れば全画面が同時に変わる */
+                  --btn-w: 240px;         /* ← まずはこれ。短くしたければ 220px とか */
+                }
+
+                /* すべての「ボタンっぽいもの」を同じ幅に揃える */
+                .btn,
+                .primary-btn{
+                  width: var(--btn-w) !important;
+                  min-width: 0 !important;     /* 画面ごとの min-width 指定を殺す */
+                  max-width: none !important;
+                  flex: 0 0 auto !important;   /* flex:1 で伸びるのを殺す */
+                }
+
+                /* ボタンを置いてる “行” 側も、伸ばさないで中央寄せにする */
+                .screen--intro .actions,
+                body.mode-timeline .actions,
+                body.mode-params .footer,
+                body.mode-complete .actions,
+                body.mode-memo .actions,
+                body.mode-split .actions,
+                body.mode-2 .actions,
+                body.mode-3 .actions,
+                body.mode-4 .actions{
+                  display: flex !important;
+                  justify-content: center !important;
+                  align-items: center !important;
+                  gap: 14px !important;
+                  flex-wrap: wrap !important; /* 横が狭いときは折り返す */
+                }
+
+                /* intro が縦積みなら縦方向だけ維持（幅は固定のまま） */
+                .screen--intro .actions{
+                  flex-direction: column !important;
+                }
+
+                /* params の 1/1 は prev を消して中央寄せ（幅は共通のまま） */
+                body.single-scene.mode-params #prevScene{
+                  display: none !important;
+                }
+
+                /* ✅「完成！」色替え（これは横幅に関係ないので残す） */
+                body.mode-params.is-last-scene #nextScene,
+                body.single-scene.mode-params #nextScene{
+                  background-image: linear-gradient(135deg,var(--btn-done-from),var(--btn-done-to)) !important;
+                  box-shadow: 0 2px 12px rgba(0,0,0,.65), 0 0 18px rgba(142,162,255,.35) !important;
+                }
+
+                /* ✅ 記録するボタンは普通（幅は共通のまま） */
+                #btn-record{
+                  background-image: linear-gradient(135deg,var(--btn-primary-from),var(--btn-primary-to)) !important;
+                  box-shadow: 0 2px 10px rgba(0,0,0,.65), 0 0 16px rgba(255,255,255,.35) !important;
+                }
+                /* 画面切り替えの瞬間だけ、screenのフェードを殺してチラ見えを防ぐ */
+                body.mode-switching .screen{
+                  transition: none !important;
+                }
+                /* ===== remake modal：ボタン2つが必ず入る横幅にする ===== */
+                :root{
+                  --modal-gap: 12px;      /* ボタン間 */
+                  --modal-pad-x: 24px;    /* モーダル左右padding（現状と合わせる） */
+                }
+
+                /* 既存 .modal の width/max-width を上書き */
+                .modal{
+                  /* ボタン2個 + gap + 左右padding が入る幅を最低保証 */
+                  width: min(
+                    calc(var(--btn-w) * 2 + var(--modal-gap) + var(--modal-pad-x) * 2),
+                    92vw
+                  ) !important;
+
+                  max-width: none !important; /* 420px制限を殺す */
+                  padding-left: var(--modal-pad-x) !important;
+                  padding-right: var(--modal-pad-x) !important;
+                }
+
+                /* ボタン行：中央揃え＆高さ揃え */
+                .modal-actions{
+                  display: flex !important;
+                  justify-content: center !important;
+                  align-items: center !important;
+                  gap: var(--modal-gap) !important;
+                  flex-wrap: nowrap !important; /* 折り返さない（箱を広げる方針なので） */
+                }
+
+                /* 文字の位置：他の画面と同じノリで “左寄せ” に統一 */
+                .modal p{
+                  text-align: left !important;
+                }
+                
+                /* =========================
+                   params画面：現状を固定したまま
+                   「文言 + 場面バー」だけさらに下げる
+                   - redo-linkは固定なので触らない
+                   ========================= */
+
+                :root{
+                  --btn-h: 44px;                 /* 既存と同じならOK */
+                  --params-titleband-shift: var(--btn-h);  /* 今回の追加下げ量 */
+                }
+
+                /* 1) 前/次/完成 の列：現状維持（下に余白を確保してるやつ） */
+                body.mode-params .screen--params .footer{
+                  margin-top: calc(14px + var(--btn-h)) !important;
+                }
+
+                /* 2) スライダー同士：現状維持（少し詰める） */
+                body.mode-params .screen--params .sliders{
+                  gap: 4px !important;
+                }
+                body.mode-params .screen--params .row{
+                  padding-top: 15px !important;
+                }
+
+                /* 3) スライダー群の位置：現状維持（全体を少し下へ） */
+                body.mode-params .screen--params .sliders{
+                  margin-top: calc(10px + var(--btn-h)) !important;
+                }
+
+                /* 4) ✅今回の変更：文言と場面バーだけ下げる（スライダーにはかけない） */
+                body.mode-params .screen--params .hero-title,
+                body.mode-params .screen--params .bandWrap{
+                  transform: translateY(var(--params-titleband-shift)) !important;
+                  will-change: transform;
+                }
+
+                /* 5) スライダー4本だけ、0.7ボタン分 下げる */
+                :root{
+                  --params-sliders-shift: calc(var(--btn-h) * 0.7);
+                }
+
+                body.mode-params .screen--params .sliders{
+                  transform: translateY(var(--params-sliders-shift)) !important;
+                  will-change: transform;
+                }
+                /* =========================
+                   complete画面：サブの位置は維持、サイズは元に戻す
+                   ========================= */
+
+                :root{
+                  --complete-title-up: 1.5em;
+                  --complete-sub-lh: 1.7;          /* 元の行間に近い値。気に入ってるならそのままでOK */
+                  --complete-sub-nudge: 6px;       /* さっきの“ちょい上げ”は維持 */
+                }
+
+                /* タイトル上げはそのまま */
+                body.mode-complete .screen--complete .complete-title{
+                  transform: translateY(calc(-1 * var(--complete-title-up))) !important;
+                }
+
+                /* サブ：サイズ指定はしない（＝元のCSSに戻る） */
+                body.mode-complete .screen--complete .complete-sub{
+                  /* font-size: は書かない */
+                  line-height: var(--complete-sub-lh) !important;
+                  font-weight: 300 !important;
+                }
+
+                /* サブの配置（中央＋ちょい上げ）は維持 */
+                body.mode-complete .screen--complete .complete-ui{
+                  position: relative;
+                }
+                body.mode-complete .screen--complete .complete-copy{
+                  position: relative;
+                }
+                body.mode-complete .screen--complete .complete-sub{
+                  position: absolute !important;
+                  left: 50%;
+                  transform: translate(-50%, -50%) !important;
+                  top: calc(50% - var(--complete-sub-nudge));
+                  margin: 0 !important;
+                  text-align: center;
+                  width: min(820px, 92vw);
+                  text-shadow: 0 0 14px rgba(0,0,0,.9), 0 0 30px rgba(0,0,0,.9);
+                }
+
+                .admin-egg{
+                  position: fixed;
+                  right: 12px;
+                  bottom: 12px;
+                  width: 44px;
+                  height: 44px;
+                  opacity: 0;
+                  border: 0;
+                  background: transparent;
+                  pointer-events: auto;
+                }
+                
+                /* ===== admin screen: scroll fix ===== */
+                body.mode-admin{
+                  overflow: hidden; /* bodyは隠したままでOK */
+                }
+
+                /* section自体をスクロール可能にする */
+                body.mode-admin .screen--admin{
+                  align-items: stretch;
+                  justify-content: flex-start;
+                  padding: 0;
+                  overflow: auto;                 /* ←これがないと詰む */
+                  -webkit-overflow-scrolling: touch;
+                }
+
+                /* 中身の器 */
+                .adminWrap{
+                  width: min(1200px, 100%);
+                  margin: 0 auto;
+                  padding: 24px 26px 40px;
+                }
+
+                /* 上部バー：見える＆固定 */
+                .adminTop{
+                  position: sticky;
+                  top: 0;
+                  z-index: 5;
+                  display:flex;
+                  align-items:center;
+                  justify-content:space-between;
+                  gap: 12px;
+                  padding: 18px 0 14px;
+                  background: rgba(0,0,0,.55);
+                  backdrop-filter: blur(10px);
+                  border-bottom: 1px solid rgba(255,255,255,.12);
+                }
+
+                /* テーブルが横に長いので、必要なら横スクも許可 */
+                .adminTable{
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-top: 14px;
+                  min-width: 980px;               /* ←列多いので保険 */
+                }
+
+                .adminTable th, .adminTable td{
+                  border-bottom: 1px solid rgba(255,255,255,.12);
+                  padding: 10px 10px;
+                  text-align: left;
+                  font-size: 12px;
+                  color: rgba(255,255,255,.78);
+                  vertical-align: top;
+                }
+
+                .adminThumb{
+                  position: relative;
+                  background: none !important;   /* プレースホルダー背景を殺す */
+                }
+
+                .adminThumb img{
+                  display: block !important;
+                  width: 100% !important;
+                  height: 100% !important;
+                  object-fit: cover;
+                  opacity: 1 !important;
+                  position: relative;
+                  z-index: 2;                    /* 画像を手前に */
+                }
+
+                /* プレースホルダー疑似要素がいるなら最背面へ or 無効化 */
+                .adminThumb::before,
+                .adminThumb::after{
+                  z-index: 0 !important;
+                  opacity: 0 !important;         /* まず殺す。必要なら後で調整 */
+                  /* もしくは content:none !important; */
+                }
+
+                .adminActions{
+                  display:flex;
+                  gap: 8px;
+                  flex-wrap: wrap;
+                }
+
+                .adminMiniBtn{
+                  height: 34px;
+                  padding: 0 12px;
+                  border-radius: 999px;
+                  border: 1px solid rgba(255,255,255,.22);
+                  background: transparent;
+                  color: rgba(255,255,255,.85);
+                  cursor: pointer;
+                  font-size: 12px;
+                }
+                .adminMiniBtn:hover{ border-color: rgba(255,255,255,.38); }
+
+            </style>
+    </head>
+<body class="mode-intro">
+
+  <!-- 背景（束） -->
+  <canvas id="bundle-canvas"></canvas>
+  <div id="veil"></div>
+
+  <!-- 1: イントロ -->
+  <section class="screen screen--intro" aria-hidden="false">
+    <div class="intro-inner">
+      <h1 class="hero-title">
+        <span class="l1">あなたの『昨日の時間のかたち』をつくってみよう</span>
+      </h1>
+      <p class="hero-sub">昨日一日を思い出しながら、その時の時間の感じをかたちにして残します。</p>
+      <div class="actions">
+        <button class="btn" id="btn-start">はじめる</button>
+        <button class="btn btn--ghost" id="btn-open-gallery">時間のかたちギャラリーを見る</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2: 場面分け -->
+  <section class="screen screen--timeline" aria-hidden="true">
+    <div class="wrap">
+      <h1 class="title">昨日を、いくつかの場面に分けてみてください。</h1>
+      <p class="sub">バーをクリックで区切り追加・ノブをドラッグで移動。<br>場所・やること・気分が変わったところでざっくり区切るイメージです。最大5場面。</p>
+
+      <svg id="stage" viewBox="0 0 1600 200" preserveAspectRatio="none" style="width:100%;height:120px;display:block;">
+        <defs>
+          <linearGradient id="dayGrad" x1="40" y1="100" x2="1560" y2="100" gradientUnits="userSpaceOnUse">
+            <stop offset="0%"  stop-color="#b9d7ff"/>
+            <stop offset="45%" stop-color="#f6f2c8"/>
+            <stop offset="70%" stop-color="#ffd2b8"/>
+            <stop offset="100%" stop-color="#8da0ff"/>
+          </linearGradient>
+          <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="0.6" stdDeviation="0.8" flood-color="#000" flood-opacity=".45"/>
+          </filter>
+          <linearGradient id="knobHeadGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff"/>
+            <stop offset="55%" stop-color="#e9ecf6"/>
+            <stop offset="100%" stop-color="#d7dbe8"/>
+          </linearGradient>
+          <linearGradient id="knobHeadGradSel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff"/>
+            <stop offset="55%" stop-color="#dbe2ff"/>
+            <stop offset="100%" stop-color="#cdd6ff"/>
+          </linearGradient>
+          <linearGradient id="stemGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff"/>
+            <stop offset="100%" stop-color="#dfe3f2"/>
+          </linearGradient>
+          <linearGradient id="stemGradSel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fff"/>
+            <stop offset="100%" stop-color="#d3dbff"/>
+          </linearGradient>
+          <filter id="innerShade" x="-20%" y="-30%" width="140%" height="160%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="1.6" result="b"/>
+            <feOffset dx="0" dy="1" result="o"/>
+            <feComposite in="o" in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="i"/>
+            <feColorMatrix in="i" type="matrix"
+              values="0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 .55 0"/>
+          </filter>
+          <filter id="specular" x="-20%" y="-30%" width="140%" height="160%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="0.8" result="b"/>
+            <feSpecularLighting in="b" surfaceScale="2.5" specularConstant="0.55" specularExponent="18" lighting-color="#fff" result="lit">
+              <fePointLight x="-20" y="-40" z="60"/>
+            </feSpecularLighting>
+            <feComposite in="lit" in2="SourceAlpha" operator="in"/>
+            <feColorMatrix type="matrix"
+              values="1 0 0 0 0
+                      0 1 0 0 0
+                      0 0 1 0 0
+                      0 0 0 .75 0"/>
+          </filter>
+          <filter id="knobDrop" x="-60%" y="-60%" width="220%" height="220%">
+            <feDropShadow dx="0" dy="1.2" stdDeviation="1.6" flood-color="#000" flood-opacity=".38"/>
+          </filter>
+          <filter id="selGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feColorMatrix in="SourceAlpha" type="matrix"
+              values="0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 0 0
+                      0 0 0 1 0" result="a"/>
+            <feGaussianBlur in="a" stdDeviation="3" result="b1"/>
+            <feGaussianBlur in="a" stdDeviation="7" result="b2"/>
+            <feMerge result="m">
+              <feMergeNode in="b1"/><feMergeNode in="b2"/>
+            </feMerge>
+            <feFlood flood-color="#90a0ff" flood-opacity=".45" result="gc"/>
+            <feComposite in="gc" in2="m" operator="in" result="glow"/>
+            <feMerge>
+              <feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        <rect id="guide" x="40" y="86" width="1520" height="28" rx="14"
+          fill="url(#dayGrad)" opacity="0.32"
+          stroke="var(--band-stroke)" stroke-width="1"/>
+        <g id="segments"></g>
+        <g id="knobs"></g>
+
+        <text x="35" y="120" font-size="24" fill="var(--muted)"
+          filter="url(#textShadow)" dominant-baseline="hanging">起きた</text>
+        <text x="1565" y="120" font-size="24" fill="var(--muted)"
+          filter="url(#textShadow)" text-anchor="end" dominant-baseline="hanging">寝た</text>
+      </svg>
+
+      <div class="actions">
+        <button class="btn" id="btn-delete" disabled>選択中のノブを削除</button>
+        <button class="btn" id="btn-ok">この区切り方でOK</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2.5: 予告 -->
+  <section class="screen screen--announce" aria-hidden="true">
+    <div class="announce-inner">
+      <h1>これから、場面ごとに「その時の感じ」を入力します。</h1>
+    </div>
+  </section>
+
+  <!-- 3: パラメータ入力 -->
+  <section class="screen screen--params" aria-hidden="true">
+    <div class="params-wrap">
+      <h1 class="hero-title" style="text-align:center;">
+        <span class="l1">昨日のこの時間の空気に一番近いところにスライダーを寄せてみてください。</span>
+        <span class="l2">なんとなくで大丈夫です。</span>
+      </h1>
+
+      <div class="bandWrap">
+        <div class="scene-counter" id="sceneCounter">場面 1 / 1</div>
+        <div class="band">
+          <svg id="sceneBand" viewBox="0 0 1600 100" preserveAspectRatio="none">
+            <g id="bandSegs"></g>
+          </svg>
+        </div>
+      </div>
+
+      <div class="sliders">
+        <div class="row">
+          <p class="label">おもみ</p>
+          <input class="range" type="range" min="0" max="1" step="0.01" id="p_weight">
+          <div class="tips"><span>すかすか</span><span>ずっしり</span></div>
+        </div>
+        <div class="row">
+          <p class="label">あざやかさ</p>
+          <input class="range" type="range" min="0" max="1" step="0.01" id="p_vivid">
+          <div class="tips"><span>ぼんやり</span><span>パキパキ</span></div>
+        </div>
+        <div class="row">
+          <p class="label">おちつき</p>
+          <input class="range" type="range" min="0" max="1" step="0.01" id="p_calm">
+          <div class="tips"><span>ざわざわ</span><span>すん…</span></div>
+        </div>
+        <div class="row">
+          <p class="label">ぬくもり</p>
+          <input class="range" type="range" min="0" max="1" step="0.01" id="p_warm">
+          <div class="tips"><span>ひんやり</span><span>ぽかぽか</span></div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <button class="btn" id="prevScene">前の場面へ</button>
+        <button class="btn" id="nextScene">次の場面へ</button>
+      </div>
+    </div>
+    <button class="redo-link" id="redo">場面の分け方をやり直す</button>
+  </section>
+
+  <!-- 4: 完成画面 -->
+  <section class="screen screen--complete" aria-hidden="true">
+    <div class="complete-inner">
+      <div class="bundle-frame">
+        <canvas id="result-canvas"></canvas>
+      </div>
+
+      <div class="complete-ui">
+        <div class="complete-copy">
+          <h1 class="complete-title">あなたの『昨日の時間のかたち』ができました</h1>
+          <p class="complete-sub">しっくりくるでしょうか？</p>
+        </div>
+
+        <div class="complete-actions">
+          <button class="btn btn-primary" id="btn-record">記録する</button>
+          <button class="link-btn" id="btn-remake">もう一度作り直す</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 全消去の確認モーダル -->
+    <div class="modal-backdrop" id="remake-modal" hidden>
+      <div class="modal">
+        <p>場面の区切りと場面ごとのスライダーの入力はすべて消えてしまいます。</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="remake-cancel">やっぱりやめる</button>
+          <button class="btn" id="remake-ok">OK</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5: 断片メモ画面 -->
+  <section class="screen screen--memo" aria-hidden="true">
+    <div class="memo-shell">
+      <section class="memo-main" id="memoMain">
+        <!-- 左カラム -->
+        <div class="memo-left">
+          <h1 class="memo-title">断片を残して保存しよう。</h1>
+          <p class="memo-lead">
+            この日のことを、あとから自分や誰かが思い出せるように。
+          </p>
+          <p class="memo-note">
+            昨日の時間のかたちに、すこしだけ言葉を結びつけます。<br>
+            ４つのうち、どれかひとつだけでもかまいません。
+          </p>
+          <div class="bundle-preview" id="bundleBox">
+            <div class="bundle-preview-inner" id="bundlePreview">
+              <!-- 束プレビュー用 three.js canvas -->
+              <canvas id="memoBundleCanvas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- ガイド線 -->
+        <svg class="memo-lines" id="memoLines" xmlns="http://www.w3.org/2000/svg"></svg>
+
+        <!-- 右カラム -->
+        <div class="memo-right">
+          <form id="memoForm" autocomplete="off">
+            <div class="memo-list">
+              <article class="memo-card" data-field="where">
+                <p class="memo-label">どこで過ごしていましたか？</p>
+                <div class="memo-input-shell">
+                  <input
+                    class="memo-input"
+                    type="text"
+                    name="where"
+                    placeholder="例） 家 / 学校..."
+                  />
+                </div>
+              </article>
+
+              <article class="memo-card" data-field="who">
+                <p class="memo-label">だれと一緒でしたか？（ひとりでもOK）</p>
+                <div class="memo-input-shell">
+                  <input
+                    class="memo-input"
+                    type="text"
+                    name="who"
+                    placeholder="例） 家族 / 友だち..."
+                  />
+                </div>
+              </article>
+
+              <article class="memo-card" data-field="what">
+                <p class="memo-label">なにをしていましたか？</p>
+                <div class="memo-input-shell">
+                  <input
+                    class="memo-input"
+                    type="text"
+                    name="what"
+                    placeholder="例） アルバイト / 移動中..."
+                  />
+                </div>
+              </article>
+
+              <article class="memo-card" data-field="note">
+                <p class="memo-label">ひとことコメント</p>
+                <div class="memo-input-shell">
+                  <input
+                    class="memo-input"
+                    type="text"
+                    name="note"
+                    placeholder="例） ひさしぶりにゆっくりできた日"
+                  />
+                </div>
+              </article>
+            </div>
+
+            <div class="memo-footer">
+              <button type="button" class="skip-link" id="btnSkip">
+                保存せずに終わる
+              </button>
+              <button type="submit" class="primary-btn" id="btnSave" disabled>
+                保存してギャラリーをみる
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- 6: ギャラリー画面 -->
+  <section class="screen screen--gallery" aria-hidden="true">
+    <header class="gallery-topbar">
+      <div class="topbar-title">時間のかたちギャラリー</div>
+      <div class="topbar-ctl">
+        <button class="topbar-btn" id="btnAuto" type="button" aria-pressed="true">オート ON</button>
+        <button class="topbar-btn" id="btnBackToIntro" type="button">はじめから</button>
+      </div>
+    </header>
+
+    <div class="gallery-shell">
+      <div class="g-stack">
+
+        <!-- あなた -->
+        <section class="g-block">
+          <div class="g-left">
+            <div class="g-head">
+              <div class="g-label">あなたのかたち</div>
+              <div class="g-meta" id="yourMeta"></div>
+            </div>
+
+            <div class="g-info">
+              <div class="g-line" id="yourWhereRow"><span id="yourWhere"></span></div>
+              <div class="g-line" id="yourWhoRow"><span id="yourWho"></span></div>
+              <div class="g-line" id="yourWhatRow"><span id="yourWhat"></span></div>
+              <div class="g-line" id="yourNoteRow"><span id="yourNote"></span></div>
+            </div>
+          </div>
+
+          <div class="g-stage g-stage--big">
+            <canvas id="galleryYourCanvas"></canvas>
+          </div>
+          
+          <button id="adminEasterEgg" class="admin-egg" aria-label="admin"></button>
+
+        </section>
+
+        <!-- 区切り線 -->
+        <div class="g-divider" aria-hidden="true"></div>
+
+        <!-- みんな -->
+        <section class="g-block">
+          <div class="g-left">
+            <div class="g-head">
+              <div class="g-label">みんなのかたち</div>
+              <div class="g-meta" id="allMeta"></div>
+            </div>
+
+            <div class="g-info">
+              <div class="g-line" id="allWhereRow"><span id="allWhere"></span></div>
+              <div class="g-line" id="allWhoRow"><span id="allWho"></span></div>
+              <div class="g-line" id="allWhatRow"><span id="allWhat"></span></div>
+              <div class="g-line" id="allNoteRow"><span id="allNote"></span></div>
+            </div>
+          </div>
+
+          <div class="g-stage g-stage--big">
+            <canvas id="galleryAllCanvas"></canvas>
+          </div>
+        </section>
+
+      </div>
+
+      <aside class="right-rail" aria-hidden="true">
+        <canvas id="rightStreamCanvas"></canvas>
+      </aside>
+    </div>
+  </section>
+
+  <section class="screen screen--admin" aria-hidden="true" inert>
+    <div class="adminWrap">
+      <div class="adminTop">
+        <div class="adminTitle">管理画面</div>
+        <button id="adminBack" class="btn">ギャラリーへ戻る</button>
+      </div>
+
+      <table class="adminTable">
+        <thead>
+          <tr>
+            <th>体験した時間</th>
+            <th>サムネ</th>
+            <th>断片メモ</th>
+            <th>公開</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="adminBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- three.js 背景 -->
+  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+  <script>
+    /* ===== ゴースト束（背景） ===== */
+    const canvas = document.getElementById("bundle-canvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x050509, 1);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 400);
+    camera.position.set(0,0,-28); camera.lookAt(0,0,0); scene.add(camera);
+    const group = new THREE.Group(); scene.add(group);
+    const LINE_COUNT=70, SEGS=150, WIDTH_X=34, LANE_SPACING=0.035;
+    let C1=new THREE.Color().setHSL(0.80,0.35,0.78);
+    let C2=new THREE.Color().setHSL(0.10,0.35,0.82);
+    let C3=new THREE.Color().setHSL(0.57,0.35,0.80);
+    const TMP=new THREE.Color();
+    function yScale(){ return 0.85*(1-2*0.05); }
+    function buildBundle(){
+      while(group.children.length){
+        const o=group.children.pop(); o.geometry?.dispose(); o.material?.dispose();
+      }
+      const ys=yScale();
+      for(let i=0;i<LINE_COUNT;i++){
+        const g=new THREE.BufferGeometry();
+        const P=new Float32Array((SEGS+1)*3);
+        const B=new Float32Array((SEGS+1)*3);
+        const C=new Float32Array((SEGS+1)*3);
+        const lane=(i-LINE_COUNT/2)*LANE_SPACING;
+        const depth=(Math.random()-.5)*1.2;
+        const ph=Math.random()*Math.PI*2;
+        const aA=4.0*(.85+Math.random()*.3);
+        const aB=1.8*(.75+Math.random()*.4);
+        const fr=1.5+Math.random()*1.5;
+        for(let j=0;j<=SEGS;j++){
+          const t=j/SEGS, x=(t-.5)*WIDTH_X;
+          const wave=Math.sin(t*Math.PI*fr+ph)*aA +
+                      Math.sin(t*Math.PI*(fr*.62)+ph*1.7)*aB;
+          const y=(lane+wave*.85)*ys;
+          const z=depth+Math.cos(t*Math.PI*2+ph)*.35;
+          const k=j*3;
+          P[k]=B[k]=x; P[k+1]=B[k+1]=y; P[k+2]=B[k+2]=z;
+          if(t<.5) TMP.copy(C1).lerp(C2,t*2);
+          else     TMP.copy(C2).lerp(C3,(t-.5)*2);
+          TMP.lerp(new THREE.Color(0xffffff), 1-.55);
+          C[k]=TMP.r; C[k+1]=TMP.g; C[k+2]=TMP.b;
+        }
+        g.setAttribute("position", new THREE.BufferAttribute(P,3));
+        g.setAttribute("basePosition", new THREE.BufferAttribute(B,3));
+        g.setAttribute("color", new THREE.BufferAttribute(C,3));
+        g.userData.waveAmp=.32+Math.random()*.42;
+        g.userData.waveFreq=.38+Math.random()*.40;
+        g.userData.phase=Math.random()*Math.PI*2;
+        const m=new THREE.LineBasicMaterial({
+          vertexColors:true, transparent:true,
+          opacity:.36+Math.random()*.10
+        });
+        group.add(new THREE.Line(g,m));
+      }
+      group.position.set(0,.2,0);
+    }
+    buildBundle();
+
+    function applyParams(a,b,c,d){
+      const H = (1-d)*0.58 + d*0.03;
+      const sat = 0.25 + 0.6*b;
+      const light = 0.80 - 0.28*a;
+      C1.setHSL(H+0.18, sat, light);
+      C2.setHSL(H,      sat, light+0.02);
+      C3.setHSL(H-0.18, sat, light);
+      for(const line of group.children){
+        const col=line.geometry.getAttribute("color"), arr=col.array, N=col.count;
+        for(let j=0;j<N;j++){
+          const t=j/(N-1);
+          if(t<.5) TMP.copy(C1).lerp(C2,t*2);
+          else     TMP.copy(C2).lerp(C3,(t-.5)*2);
+          arr[j*3]=TMP.r; arr[j*3+1]=TMP.g; arr[j*3+2]=TMP.b;
+        }
+        col.needsUpdate=true;
+        line.material.opacity = 0.30 + 0.5*a;
+        line.material.needsUpdate = true;
+      }
+      const calm=c;
+      for(const line of group.children){
+        const g=line.geometry;
+        const bA=g.userData.baseAmp??g.userData.waveAmp;
+        const bF=g.userData.baseFreq??g.userData.waveFreq;
+        if(g.userData.baseAmp==null){
+          g.userData.baseAmp=bA;
+          g.userData.baseFreq=bF;
+        }
+        g.userData.waveAmp=bA*(0.5+(1-calm)*1.2);
+        g.userData.waveFreq=bF*(0.55+(1-calm)*1.1);
+      }
+    }
+    let boost=0;
+    function breathe(){ boost=5; }
+    function tick(){
+      requestAnimationFrame(tick);
+      const t=performance.now()*0.001; boost*=.94;
+      for(const line of group.children){
+        const g=line.geometry;
+        const P=g.getAttribute("position");
+        const B=g.getAttribute("basePosition");
+        const N=B.count, b=B.array, p=P.array;
+        const amp=(g.userData.waveAmp||.5)*(1+boost*.06);
+        const f=(g.userData.waveFreq||.5);
+        const ph=g.userData.phase||0;
+        for(let i=0;i<N;i++){
+          const k=i*3, u=i/(N-1||1);
+          const a=amp*(.40+.75*Math.sin(u*Math.PI));
+          const sway=Math.sin(t*f+ph+u*3)*a;
+          p[k]=b[k]; p[k+1]=b[k+1]+sway; p[k+2]=b[k+2];
+        }
+        P.needsUpdate=true;
+      }
+      renderer.render(scene,camera);
+    }
+    tick();
+
+    addEventListener("resize", ()=>{
+      renderer.setSize(innerWidth,innerHeight,false);
+      camera.aspect=innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      buildBundle();
+    });
+    renderer.setSize(innerWidth,innerHeight,false);
+    window.GhostBundle={ set:(a,b,c,d)=>applyParams(a,b,c,d), breathe };
+
+    /* ===== 1→2→2.5→3→4→メモ 全体ロジック ===== */
+
+    // ====== ローカル保存まわり ======
+    const STORAGE_KEY = "timeform_records_v1";
+    let currentRecordId = null;  // いま編集中のレコードID
+
+    function escapeXml(s){
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    }
+
+    function makeSimpleThumb(rec){
+      const raw = (rec.targetDate || rec.createdAt || rec.id || "").toString();
+
+      // ✅ ここが本命：SVG内に入れる文字は XML として安全にする
+      const text = escapeXml(raw);
+
+      const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">
+      <rect width="240" height="120" fill="rgba(255,255,255,0.08)"/>
+      <rect x="8" y="8" width="224" height="104" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.18)"/>
+      <text x="16" y="32" fill="#fff" font-size="12" font-family="sans-serif">${text}</text>
+    </svg>`.trim();
+
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    }
+
+    // 角丸rectヘルパー
+    function roundRect(ctx, x, y, w, h, r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x+rr, y);
+      ctx.arcTo(x+w, y,   x+w, y+h, rr);
+      ctx.arcTo(x+w, y+h, x,   y+h, rr);
+      ctx.arcTo(x,   y+h, x,   y,   rr);
+      ctx.arcTo(x,   y,   x+w, y,   rr);
+      ctx.closePath();
+    }
+
+    function loadAllRecords(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed) ? parsed : [];
+        return list.map(r => ({
+          ...r,
+          updatedAt: r.updatedAt || r.createdAt || r.id,
+          tags: r.tags || { where:"", who:"", what:"", note:"" },
+          isPublic: typeof r.isPublic === "boolean" ? r.isPublic : false,
+          thumb: r.thumb || "",
+          deleted: typeof r.deleted === "boolean" ? r.deleted : false
+        })).filter(r => !r.deleted);
+      }catch(e){
+        console.error("TimeForm: 記録の読み込みに失敗しました", e);
+        return [];
+      }
+    }
+
+    function saveAllRecords(list){
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      }catch(e){
+        console.error("TimeForm: 記録の保存に失敗しました", e);
+      }
+    }
+      
+      function updateRecord(id, patch){
+        const all = loadAllRecords();
+        const i = all.findIndex(r => r.id === id);
+        if(i < 0) return null;
+        const next = { ...all[i], ...patch, updatedAt: new Date().toISOString() };
+        all[i] = next;
+        saveAllRecords(all);
+        return next;
+      }
+
+      function deleteRecord(id){
+        const all = loadAllRecords();
+        const next = all.filter(r => r.id !== id); // 物理削除
+        saveAllRecords(next);
+      }
+
+      // ✅ tags込みで「このタイミングで」1件保存する（＝保存確定ポイント）
+      function saveCurrentBundleToLocal(segments, tags){
+        if (!Array.isArray(segments) || segments.length === 0){
+          console.warn("TimeForm: 保存できる束がありません");
+          return null;
+        }
+
+        const now = new Date();
+
+        // 「いつ（自動）」用に、とりあえず「昨日の日付」を入れておく
+        const y = new Date(now.getTime() - 24*60*60*1000);
+        const pad = n => String(n).padStart(2,"0");
+        const dateLabel = `${y.getFullYear()}/${pad(y.getMonth()+1)}/${pad(y.getDate())}`;
+
+        const record = {
+          id: now.toISOString(),
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          targetDate: dateLabel,
+          segments,
+          tags: {
+            where: tags?.where ?? "",
+            who:   tags?.who   ?? "",
+            what:  tags?.what  ?? "",
+            note:  tags?.note  ?? ""
+          },
+          isPublic: false,
+          thumb: "",      // DataURL想定（後で生成）
+          deleted: false  // 使わないなら消してもOK
+        };
+
+        const all = loadAllRecords();
+        all.push(record);
+        saveAllRecords(all);
+
+        console.log("TimeForm: 記録を保存しました", record, "現在の件数:", all.length);
+        return record.id;
+      }
+
+    // 画面モード
+    const bgCanvas = document.getElementById('bundle-canvas');
+    const veilEl   = document.getElementById('veil');
+
+    const setMode = (m) => {
+        const MODES = [
+          'mode-intro','mode-timeline','mode-announce','mode-params',
+          'mode-complete','mode-memo','mode-gallery','mode-admin'
+        ];
+        document.body.classList.remove(...MODES);
+        document.body.classList.add(m);
+
+      // ✅ アクティブ画面以外は aria-hidden + inert にする（警告もフォーカス事故も消える）
+      const activeClass = m.replace('mode-','screen--');
+      document.querySelectorAll('.screen').forEach(sec=>{
+        const isActive = sec.classList.contains(activeClass);
+        sec.setAttribute('aria-hidden', String(!isActive));
+        if(isActive) sec.removeAttribute('inert');
+        else sec.setAttribute('inert','');
+      });
+
+      if (window.GhostBundle) window.GhostBundle.breathe();
+      // 背景は消さない。必要な画面だけ薄くする（暗転を防ぐ）
+      const dimBG = (m === 'mode-complete' || m === 'mode-memo' || m === 'mode-gallery');
+      document.body.classList.toggle('bg-dim', dimBG);
+
+      // display は触らない（瞬断を起こすので禁止）
+      if (bgCanvas) bgCanvas.style.display = 'block';
+      if (veilEl)   veilEl.style.display   = 'block';
+    };
+
+    document.getElementById('btn-start')
+      .addEventListener('click', ()=> setMode('mode-timeline'));
+
+    // イントロ → ギャラリー直行
+    document.getElementById('btn-open-gallery')
+      ?.addEventListener('click', () => {
+        const all = (typeof loadAllRecords === 'function') ? loadAllRecords() : [];
+
+        // まずギャラリー画面へ
+        setMode('mode-gallery');
+
+        setMode('mode-gallery');
+        buildPublicGallery();
+
+        // 記録があるなら、既存の showGallery に任せる（最新を表示）
+        if (all && all.length){
+          if (typeof showGallery === 'function'){
+            showGallery(all[all.length - 1].id);
+          }
+          return;
+        }
+
+        // 記録ゼロでも破綻しない最低限の空表示
+        if (typeof clearGalleryBundle === 'function') clearGalleryBundle();
+        if (typeof clearAllBundle === 'function') clearAllBundle();
+
+        if (typeof yourMetaEl !== 'undefined' && yourMetaEl)  yourMetaEl.textContent  = '';
+        if (typeof yourWhereEl !== 'undefined' && yourWhereEl) yourWhereEl.textContent = '';
+        if (typeof yourWhoEl !== 'undefined' && yourWhoEl)   yourWhoEl.textContent   = '';
+        if (typeof yourWhatEl !== 'undefined' && yourWhatEl)  yourWhatEl.textContent  = '';
+        if (typeof yourNoteEl !== 'undefined' && yourNoteEl)  yourNoteEl.textContent  = 'あなたのかたちはまだありません';
+
+        if (typeof buildRightRailStream === 'function') buildRightRailStream([], null);
+
+        requestAnimationFrame(() => {
+          onGalleryResize?.();
+          onAllResize?.();
+          onRightStreamResize?.();
+        });
+      });
+
+
+    /* --- 2: 分割UI --- */
+    const svg = document.getElementById('stage'),
+          segRoot=document.getElementById('segments'),
+          knobRoot=document.getElementById('knobs');
+    const btnDelete=document.getElementById('btn-delete'),
+          btnOK=document.getElementById('btn-ok');
+    const BAR_Y=86, BAR_H=28, BAR_RX=14, PAD_X=40;
+    const GAP_TARGET=24, MIN_GAP_PX=32, OPEN_OVERSHOOT=1.12, OPEN_MS=220, RELEASE_MS=120, MAX_KNOBS=4;
+    let handles=[], gaps=[], tweens={}, drag=null, selected=-1;
+    const barLeft =()=>PAD_X, barRight=()=>1600-PAD_X, barWidth=()=>barRight()-barLeft();
+    const ratioToX=r=>barLeft()+r*barWidth(), xToRatio=x=>(x-barLeft())/barWidth(), clamp=(v,min,max)=>Math.min(max,Math.max(min,v));
+    function minGapRatio(){
+      const px=(MIN_GAP_PX + GAP_TARGET*2)/barWidth();
+      return Math.max(px,0.02);
+    }
+    function render2(){
+      segRoot.innerHTML=''; knobRoot.innerHTML='';
+      const pts=[0,...handles,1];
+      for(let i=0;i<pts.length-1;i++){
+        const a=pts[i], b=pts[i+1];
+        const leftTrim =(i===0)?0:(gaps[i-1]??GAP_TARGET);
+        const rightTrim=(i===pts.length-2)?0:(gaps[i]??GAP_TARGET);
+        const ax=ratioToX(a)+leftTrim, bx=ratioToX(b)-rightTrim;
+        const w=Math.max(0,bx-ax), r=Math.min(BAR_RX,w/2);
+        const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        rect.setAttribute('x',ax);
+        rect.setAttribute('y',BAR_Y);
+        rect.setAttribute('width',w);
+        rect.setAttribute('height',BAR_H);
+        rect.setAttribute('rx',r);
+        rect.setAttribute('fill','url(#dayGrad)');
+        rect.setAttribute('stroke','var(--band-stroke)');
+        rect.setAttribute('stroke-width','1');
+        segRoot.appendChild(rect);
+      }
+      handles.forEach((r,i)=>{
+        const x=ratioToX(r);
+        const g=mkKnob(x,i===selected);
+        g.dataset.index=i;
+        g.addEventListener('pointerdown',onKnobDown);
+        knobRoot.appendChild(g);
+      });
+      btnDelete.disabled = !(selected>=0);
+    }
+    function mkKnob(x,sel){
+      const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+      g.classList.add('knob');
+      g.setAttribute('transform',`translate(${x},${BAR_Y})`);
+      g.setAttribute('filter', sel ? 'url(#selGlow)' : 'url(#knobDrop)');
+      const stem=document.createElementNS('http://www.w3.org/2000/svg','path');
+      const topW=3.2,botW=2.4,halfT=topW/2,halfB=botW/2;
+      const yTop=-40,yBot=BAR_H+40;
+      stem.setAttribute('d',`M ${-halfT} ${yTop} L ${halfT} ${yTop} L ${halfB} ${yBot} L ${-halfB} ${yBot} Z`);
+      stem.setAttribute('fill', sel?'url(#stemGradSel)':'url(#stemGrad)');
+      stem.setAttribute('stroke', sel?'#90a0ff':'#9aa0b3');
+      stem.setAttribute('stroke-opacity', sel?'.95':'.5');
+      stem.setAttribute('stroke-width', sel?'1.2':'1');
+      g.appendChild(stem);
+      const groove=document.createElementNS('http://www.w3.org/2000/svg','line');
+      groove.setAttribute('x1','0'); groove.setAttribute('x2','0');
+      groove.setAttribute('y1',yTop+2); groove.setAttribute('y2',yBot-2);
+      groove.setAttribute('stroke','#000');
+      groove.setAttribute('stroke-opacity','.22');
+      groove.setAttribute('stroke-width','0.8');
+      g.appendChild(groove);
+      const head=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      const headW=32,headH=20,rx=6;
+      head.setAttribute('x',-headW/2);
+      head.setAttribute('y',-BAR_H-38);
+      head.setAttribute('width',headW);
+      head.setAttribute('height',headH);
+      head.setAttribute('rx',rx);
+      head.setAttribute('fill', sel?'url(#knobHeadGradSel)':'url(#knobHeadGrad)');
+      head.setAttribute('stroke', sel?'#90a0ff':'#9aa0b3');
+      head.setAttribute('stroke-opacity', sel?'.95':'.55');
+      head.setAttribute('stroke-width', sel?'1.4':'1');
+      g.appendChild(head);
+      const inner=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      inner.setAttribute('x',-headW/2);
+      inner.setAttribute('y',-BAR_H-38);
+      inner.setAttribute('width',headW);
+      inner.setAttribute('height',headH);
+      inner.setAttribute('rx',rx);
+      inner.setAttribute('fill','#000');
+      inner.setAttribute('opacity','.25');
+      inner.setAttribute('filter','url(#innerShade)');
+      g.appendChild(inner);
+      const spec=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      spec.setAttribute('x',-headW/2);
+      spec.setAttribute('y',-BAR_H-38);
+      spec.setAttribute('width',headW);
+      spec.setAttribute('height',headH);
+      spec.setAttribute('rx',rx);
+      spec.setAttribute('fill','#fff');
+      spec.setAttribute('filter','url(#specular)');
+      spec.setAttribute('opacity','.85');
+      g.appendChild(spec);
+      const ring=document.createElementNS('http://www.w3.org/2000/svg','rect');
+      ring.setAttribute('x',-headW/2-4);
+      ring.setAttribute('y',-BAR_H-42);
+      ring.setAttribute('width',headW+8);
+      ring.setAttribute('height',headH+8);
+      ring.setAttribute('rx',rx+4);
+      ring.setAttribute('fill','none');
+      ring.setAttribute('stroke','#90a0ff');
+      ring.setAttribute('stroke-width','1.4');
+      ring.setAttribute('opacity', sel?'.5':'0');
+      ring.classList.add('ring');
+      if(sel) ring.classList.add('breath');
+      g.appendChild(ring);
+      return g;
+    }
+    svg.addEventListener('pointerdown',e=>{
+      if(e.target.closest('.knob')) return;
+      if(handles.length>=MAX_KNOBS){ denyFeedback(); return; }
+      const pt=svgPoint(e); let r=xToRatio(pt.x);
+      const guard=minGapRatio();
+      r=clamp(r,guard,1-guard);
+      for(const h of handles) if(Math.abs(h-r)<guard) return;
+      let i=0; while(i<handles.length && handles[i]<r) i++;
+      handles.splice(i,0,r);
+      gaps.splice(i,0,0);
+      animateGapTo(i,GAP_TARGET,OPEN_MS,OPEN_OVERSHOOT);
+      selected=i; render2();
+      const node=knobRoot.children[i];
+      if(node) node.classList.add('pop');
+    });
+    function onKnobDown(e){
+      e.preventDefault();
+      const g=e.currentTarget;
+      const idx=Number(g.dataset.index);
+      drag={idx,pointerId:e.pointerId};
+      g.setPointerCapture(e.pointerId);
+      g.classList.add('drag');
+      selected=idx;
+      render2();
+      svg.addEventListener('pointermove',onDragMove);
+      svg.addEventListener('pointerup',onDragUp,{once:true});
+    }
+    function onDragMove(e){
+      if(!drag||e.pointerId!==drag.pointerId) return;
+      const i=drag.idx;
+      const pt=svgPoint(e);
+      const guard=minGapRatio();
+      const left=(i===0)?0:handles[i-1];
+      const right=(i===handles.length-1)?1:handles[i+1];
+      let r=xToRatio(pt.x);
+      r=clamp(r,left+guard,right-guard);
+      handles[i]=r;
+      render2();
+    }
+    function onDragUp(e){
+      if(!drag) return;
+      const i=drag.idx;
+      pulseGap(i,2,RELEASE_MS);
+      const g=knobRoot.children[i];
+      if(g){
+        g.releasePointerCapture(drag.pointerId);
+        g.classList.remove('drag');
+      }
+      svg.removeEventListener('pointermove',onDragMove);
+      drag=null;
+    }
+    btnDelete.addEventListener('click', ()=>{
+      if(selected<0) return;
+      handles.splice(selected,1);
+      gaps.splice(selected,1);
+      selected=-1;
+      render2();
+    });
+
+    const state = { handles:[], segments:[0,1], current:0, values:[] };
+    let announceTimer=null;
+
+    btnOK.addEventListener('click', ()=>{
+      const b=[0,...handles.sort((a,b)=>a-b),1];
+      state.handles=[...handles];
+      state.segments=b;
+      state.current=0;
+      syncSceneFlags();
+      setMode('mode-announce');
+      announceTimer = setTimeout(() => { goToParamsScreen(); }, 3000);
+    });
+
+    const announceScreen = document.querySelector('.screen--announce');
+    if (announceScreen){
+      announceScreen.addEventListener('click', () => {
+        if (document.body.classList.contains('mode-announce')) {
+          goToParamsScreen();
+        }
+      });
+    }
+    function goToParamsScreen(){
+      if (announceTimer !== null){
+        clearTimeout(announceTimer);
+        announceTimer=null;
+      }
+      initParams();
+      setMode('mode-params');
+    }
+
+    function animateGapTo(i,target,ms,overshootMul=1){
+      cancelGapTween(i);
+      const start=performance.now();
+      const a=target*overshootMul, mid=0.66;
+      function step(t){
+        const p=Math.min(1,(t-start)/ms);
+        const e=bezierY(.2,1.4,.3,1,p);
+        gaps[i]=(e<mid)? a*(e/mid)
+                       : a + (target-a)*((e-mid)/(1-mid));
+        render2();
+        if(p<1) tweens[i]=requestAnimationFrame(step);
+        else tweens[i]=null;
+      }
+      tweens[i]=requestAnimationFrame(step);
+    }
+    function pulseGap(i,px=2,ms=120){
+      cancelGapTween(i);
+      const start=performance.now();
+      const from=gaps[i]??GAP_TARGET;
+      const to=from+px;
+      function step(t){
+        const p=Math.min(1,(t-start)/ms);
+        gaps[i]=(p<.5)? lerp(from,to,p/.5)
+                      : lerp(to,from,(p-.5)/.5);
+        render2();
+        if(p<1) tweens[i]=requestAnimationFrame(step);
+        else tweens[i]=null;
+      }
+      tweens[i]=requestAnimationFrame(step);
+    }
+    function cancelGapTween(i){
+      if(tweens[i]!=null){
+        cancelAnimationFrame(tweens[i]);
+        tweens[i]=null;
+      }
+    }
+    function denyFeedback(){
+      svg.classList.remove('shake'); void svg.offsetWidth; svg.classList.add('shake');
+    }
+    function svgPoint(e){
+      const pt=svg.createSVGPoint();
+      pt.x=e.clientX; pt.y=e.clientY;
+      const m=svg.getScreenCTM().inverse();
+      return pt.matrixTransform(m);
+    }
+    const lerp=(a,b,t)=>a+(b-a)*t;
+    const bezierY=(p0x,p0y,p1x,p1y,t)=>{
+      const u=1-t;
+      return 3*u*u*t*p0y + 3*u*t*t*p1y + t*t*t;
+    };
+    render2();
+   
+   function syncSceneFlags(){
+      const N = (state.segments?.length || 0) - 1; // 場面数
+      document.body.classList.toggle('single-scene', N === 1);
+      document.body.classList.toggle('is-last-scene', N > 0 && state.current === N - 1);
+    }
+
+    /* --- 3: パラ入力 --- */
+    const bandSegs=document.getElementById('bandSegs'),
+          sceneCounter=document.getElementById('sceneCounter');
+    const p_weight=document.getElementById('p_weight'),
+          p_vivid=document.getElementById('p_vivid'),
+          p_calm=document.getElementById('p_calm'),
+          p_warm=document.getElementById('p_warm');
+    const prevBtn=document.getElementById('prevScene'),
+          nextBtn=document.getElementById('nextScene');
+
+    function initParams(){
+      drawBand();
+      loadVals(0);
+      GhostBundle.set(+p_weight.value||.5,
+                      +p_vivid.value||.5,
+                      +p_calm.value||.5,
+                      +p_warm.value||.5);
+      updateNav();
+      syncSceneFlags();
+    }
+    function drawBand(){
+      bandSegs.innerHTML='';
+      const PAD=20, W=1560, Y=32, H=28, RX=14, N=state.segments.length-1;
+      for(let i=0;i<N;i++){
+        const a=state.segments[i], b=state.segments[i+1];
+        const ax=PAD+a*W, bx=PAD+b*W, w=Math.max(0.1,bx-ax), r=Math.min(RX,w/2);
+        const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+        rect.setAttribute('x',ax);
+        rect.setAttribute('y',Y);
+        rect.setAttribute('width',w);
+        rect.setAttribute('height',H);
+        rect.setAttribute('rx',r);
+        rect.setAttribute('class','seg'+(i===state.current?' seg--current':''));
+        bandSegs.appendChild(rect);
+      }
+      sceneCounter.textContent=`場面 ${state.current+1} / ${N}`;
+    }
+    function ensure(i){
+      if(!state.values[i]) state.values[i]={w:.5,v:.5,c:.5,wm:.5};
+    }
+    function loadVals(i){
+      ensure(i);
+      const v=state.values[i];
+      p_weight.value=v.w; p_vivid.value=v.v;
+      p_calm.value=v.c;  p_warm.value=v.wm;
+    }
+    function saveVals(i){
+      ensure(i);
+      state.values[i].w=+p_weight.value;
+      state.values[i].v=+p_vivid.value;
+      state.values[i].c=+p_calm.value;
+      state.values[i].wm=+p_warm.value;
+    }
+
+    [p_weight,p_vivid,p_calm,p_warm].forEach(el=>
+      el.addEventListener('input', ()=>{
+        saveVals(state.current);
+        GhostBundle.set(+p_weight.value,
+                        +p_vivid.value,
+                        +p_calm.value,
+                        +p_warm.value);
+      })
+    );
+
+    function updateNav(){
+        const N=state.segments.length-1;
+        prevBtn.style.visibility = (state.current===0) ? 'hidden' : 'visible';
+        nextBtn.textContent = (state.current===N-1) ? '完成！' : '次の場面へ';
+        syncSceneFlags();
+    }
+
+    prevBtn.addEventListener('click',()=>{
+      saveVals(state.current);
+      state.current=Math.max(0, state.current-1);
+      drawBand(); loadVals(state.current);
+      GhostBundle.set(+p_weight.value,
+                      +p_vivid.value,
+                      +p_calm.value,
+                      +p_warm.value);
+      updateNav();
+    });
+
+    nextBtn.addEventListener('click',()=>{
+      const N = state.segments.length - 1;
+      saveVals(state.current);
+      if (state.current === N - 1) {
+        const out = [];
+        for (let i = 0; i < N; i++) {
+          const v = state.values[i] || { w:.5, v:.5, c:.5, wm:.5 };
+          out.push({
+            tStart: state.segments[i],
+            tEnd:   state.segments[i+1],
+            weight: v.w,
+            vivid:  v.v,
+            calm:   v.c,
+            warm:   v.wm
+          });
+        }
+        window.TimeFormResult = out;
+        showComplete(out);
+        return;
+      }
+      state.current = Math.min(N - 1, state.current + 1);
+      drawBand(); loadVals(state.current);
+      GhostBundle.set(+p_weight.value,
+                      +p_vivid.value,
+                      +p_calm.value,
+                      +p_warm.value);
+      updateNav();
+    });
+
+    // ===== 完成画面 three.js（束） =====
+    const resultCanvas = document.getElementById('result-canvas');
+    const btnRecord    = document.getElementById('btn-record');
+    const btnRemake    = document.getElementById('btn-remake');
+    const modalRemake  = document.getElementById('remake-modal');
+    const remakeOK     = document.getElementById('remake-ok');
+    const remakeCancel = document.getElementById('remake-cancel');
+
+    let latestResult = null;
+    let resRenderer = null, resScene = null, resCamera = null, resRoot = null;
+    let resRadius = 30;
+    let resBaseAzimuth = -Math.PI / 2;
+    let resDragOffset = 0;
+    let resDragging = false;
+    let resLastX = 0;
+    let resRafId = null;
+
+    const SWING_PERIOD    = 60;
+    const SWING_AMPLITUDE = THREE.MathUtils.degToRad(25);
+    const DRAG_DAMPING    = 0.9;
+    const resColorTmp = new THREE.Color();
+
+    function initResultScene(){
+      if (!resultCanvas || resRenderer) return;
+      resRenderer = new THREE.WebGLRenderer({
+        canvas: resultCanvas,
+        antialias: true,
+        alpha: true
+      });
+      resRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      resScene  = new THREE.Scene();
+      resCamera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
+      resRoot   = new THREE.Group();
+      resScene.add(resRoot);
+
+      const amb = new THREE.AmbientLight(0xffffff, 0.85);
+      const key = new THREE.DirectionalLight(0xffffff, 0.7);
+      key.position.set(-4, 3, -6);
+      const rim = new THREE.DirectionalLight(0x90a0ff, 0.6);
+      rim.position.set(4, -2, 6);
+      resScene.add(amb, key, rim);
+
+      updateResultCamera(resBaseAzimuth);
+      onResultResize();
+      window.addEventListener('resize', onResultResize);
+
+      resultCanvas.addEventListener('mousedown', e => {
+        resDragging = true;
+        resLastX = e.clientX;
+        resultCanvas.classList.add('dragging');
+      });
+      window.addEventListener('mousemove', e => {
+        if (!resDragging) return;
+        const dx = e.clientX - resLastX;
+        resLastX = e.clientX;
+        resDragOffset += dx * 0.004;
+      });
+      window.addEventListener('mouseup', () => {
+        resDragging = false;
+        resultCanvas.classList.remove('dragging');
+      });
+      resultCanvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const d = e.deltaY > 0 ? 1.08 : 0.92;
+        resRadius = Math.min(80, Math.max(10, resRadius * d));
+      }, { passive: false });
+
+      const loop = () => {
+        resRafId = requestAnimationFrame(loop);
+        tickResultScene();
+      };
+      loop();
+    }
+
+    function updateResultCamera(az){
+      if (!resCamera) return;
+      const yTilt = THREE.MathUtils.degToRad(14);
+      const x = Math.cos(az) * resRadius;
+      const z = Math.sin(az) * resRadius;
+      const y = Math.sin(yTilt) * resRadius * 0.35;
+      resCamera.position.set(x, y, z);
+      resCamera.lookAt(0, 0, 0);
+    }
+    function onResultResize(){
+      if (!resRenderer || !resCamera) return;
+      const w = resultCanvas.clientWidth  || 800;
+      const h = resultCanvas.clientHeight || 260;
+      resRenderer.setSize(w, h, false);
+      resCamera.aspect = w / h;
+      resCamera.updateProjectionMatrix();
+    }
+    function clearResultBundle(){
+      if (!resRoot) return;
+      while (resRoot.children.length) {
+        const o = resRoot.children[0];
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+        resRoot.remove(o);
+      }
+    }
+
+    function smoothstep(e0, e1, x){
+      const t = THREE.MathUtils.clamp((x - e0) / (e1 - e0), 0, 1);
+      return t * t * (3 - 2 * t);
+    }
+    function calcColorShapeJitter(azayaka, ochitsuki){
+      return 0.1 * azayaka + 0.25 * (1 - ochitsuki);
+    }
+    function calcMotionJitter(ochitsuki, nukumori){
+      return 0.2 * (1 - ochitsuki) + 0.2 * (1 - nukumori);
+    }
+    function calcBundleLength(seg){
+      const span = Math.max(0.01, seg.tEnd - seg.tStart);
+      const a = seg.weight ?? 0.5;
+      const b = seg.vivid  ?? 0.5;
+      const c = seg.calm   ?? 0.5;
+
+      const BASE_LENGTH = 3.8;
+      const W_WEIGHT    = 1.0;
+      const V_WEIGHT    = 2.0;
+      const CALM_INV_W  = 1.5;
+      const PARAM_SCALE = 3.0;
+
+      const SPAN_OFFSET = 0.4;
+      const SPAN_SCALE  = 1.6;
+
+      const base = BASE_LENGTH +
+        (V_WEIGHT * b + CALM_INV_W * (1 - c) + W_WEIGHT * a) * PARAM_SCALE;
+      return base * (SPAN_OFFSET + span * SPAN_SCALE);
+    }
+
+    const CENTER_TIGHTNESS   = 0.45;
+    const EDGE_COLOR_WEAKEN  = 0.55;
+    const OVERLAP_RATIO      = 0.35;
+
+    function generateSegmentBundle(seg, xStart, xEnd, opts = {},targetGroup = resRoot){
+      const omomi     = seg.weight ?? 0.5;
+      const azayaka   = seg.vivid  ?? 0.5;
+      const ochitsuki = seg.calm   ?? 0.5;
+      const nukumori  = seg.warm   ?? 0.5;
+
+      const cJ = calcColorShapeJitter(azayaka, ochitsuki);
+      const mJ = calcMotionJitter(ochitsuki, nukumori);
+
+      const weakenLeftColor  = !!opts.weakenLeftColor;
+      const weakenRightColor = !!opts.weakenRightColor;
+
+      const baseLines = opts.baseLines ?? 60;
+      let lineCount = baseLines
+        + omomi   * 220
+        + azayaka * 60
+        + (nukumori - 0.5) * 200;
+      lineCount = Math.max(20, lineCount | 0);
+
+      const radiusBase      = 0.3 + nukumori * 0.7 + omomi * 0.15;
+      const bigWaveAmp      = 0.1 + (1 - ochitsuki) * 0.7;
+      const bigWaveFreq     = 1.0 + (1 - ochitsuki) * 3.0;
+      const microAmpCommon  = 0.01 + azayaka * 0.06 + (1 - ochitsuki) * 0.02;
+      const microAmpVarBase = (1 - ochitsuki) * (0.02 + 0.06 * azayaka);
+      const microFreqBase   = 10 + azayaka * 25;
+
+      const baseHue   = (1 - nukumori) * 0.58 + nukumori * 0.03;
+      const baseSat   = 0.25 + azayaka * 0.75;
+      const baseLight = 0.75 - omomi * 0.3;
+      const opacityBase = THREE.MathUtils.clamp(
+        0.26 + omomi * 0.34 - azayaka * 0.06,
+        0.12, 0.85
+      );
+
+      const segsPer = opts.segsPer ?? 96;
+      const tmpCol  = new THREE.Color();
+
+      const fadeStartRatio     = opts.fadeStartRatio     ?? 0.55;
+      const fadeEndRatio       = opts.fadeEndRatio       ?? 0.55;
+      const radiusMinRatio     = opts.radiusMinRatio     ?? 0.02;
+      const noiseMinRatio      = opts.noiseMinRatio      ?? 0.04;
+      const waveMinRatio       = opts.waveMinRatio       ?? 0.05;
+      const colorFadeStrength  = opts.colorFadeStrength  ?? 1.0;
+      const xJitterMax         = opts.xJitterMax         ?? 0.9;
+      const motionFadeStrength = opts.motionFadeStrength ?? 1.0;
+
+      if (opts.lineCountScale != null) lineCount = Math.round(lineCount * opts.lineCountScale);
+      if (opts.lineCountCap   != null) lineCount = Math.min(lineCount, opts.lineCountCap);
+      
+      for(let i=0;i<lineCount;i++){
+        const g    = new THREE.BufferGeometry();
+        const pos  = new Float32Array((segsPer+1)*3);
+        const base = new Float32Array((segsPer+1)*3);
+        const col  = new Float32Array((segsPer+1)*3);
+        const mfad = new Float32Array(segsPer+1);
+
+        const seed = Math.random() * 1000;
+        const rand = (h) => (Math.sin(h*12.9898 + seed*78.233) * 43758.5453) % 1;
+
+        const rRand      = rand(0.1);
+        const theta      = rand(0.2) * Math.PI * 2;
+        const spreadBase = radiusBase * (0.9 + (0.4 + cJ * 0.8) * (rand(0.3) - 0.5) * 0.6);
+        const r          = spreadBase * Math.sqrt(Math.max(rRand, 0.02));
+        const offY0      = r * Math.cos(theta);
+        const offZ0      = r * Math.sin(theta);
+
+        const microAmp  = microAmpCommon + microAmpVarBase * (0.5 + cJ);
+        const microFreq = microFreqBase * (0.8 + 0.4 * rand(0.4));
+        const bigPhase  = mJ * (rand(0.5) - 0.5) * Math.PI * 2;
+
+        let outlier = 1.0;
+        if(azayaka > 0.6 && ochitsuki < 0.4 && nukumori < 0.6 && rand(0.9) > 0.92){
+          outlier = 1.8 + mJ * 1.4;
+        }
+
+        const hBase = THREE.MathUtils.clamp(
+          baseHue + (Math.random() - 0.5) * cJ * 2,
+          0, 1
+        );
+        const sBase = THREE.MathUtils.clamp(
+          baseSat + (Math.random() - 0.5) * cJ,
+          0, 1
+        );
+        const lBase = THREE.MathUtils.clamp(
+          baseLight + (Math.random() - 0.5) * cJ * 0.8,
+          0.1, 0.95
+        );
+
+        for(let j=0;j<=segsPer;j++){
+          const t = j / segsPer;
+
+          let uS = 0, uE = 0;
+          if(t < fadeStartRatio){
+            uS = smoothstep(0, 1, (fadeStartRatio - t) / fadeStartRatio);
+          }
+          if(t > 1 - fadeEndRatio){
+            uE = smoothstep(0, 1, (t - (1 - fadeEndRatio)) / fadeEndRatio);
+          }
+          const u = Math.max(uS, uE);
+
+          const d = (t - 0.5) / 0.5;
+          const centerTight = 0.5 + 0.5 * (d*d);
+          const centerScale = (1 - CENTER_TIGHTNESS) + CENTER_TIGHTNESS * centerTight;
+
+          const radialScale = (1 - (1 - radiusMinRatio) * u) * centerScale;
+          const noiseScale  = 1 - (1 - noiseMinRatio) * u;
+          const waveScale   = 1 - (1 - waveMinRatio ) * u;
+
+          const baseX = xStart + t * (xEnd - xStart);
+          const xOff  = u > 0 ? (rand(0.6) - 0.5) * xJitterMax * u : 0;
+
+          const wPhase = t * Math.PI * bigWaveFreq + bigPhase;
+          const spineY = Math.sin(wPhase)       * bigWaveAmp * waveScale;
+          const spineZ = Math.cos(wPhase * 0.8) * bigWaveAmp * 0.5 * waveScale;
+
+          const mPhase  = t * microFreq;
+          const microY  =
+            Math.sin(mPhase) * microAmpCommon * noiseScale +
+            Math.cos(mPhase*1.3 + seed) * microAmp * 0.6 * noiseScale;
+          const microZ  =
+            Math.cos(mPhase*0.9 + seed*1.3) * microAmpCommon * noiseScale +
+            Math.sin(mPhase*1.7) * microAmp * 0.4 * noiseScale;
+
+          const mScale  = 1 + mJ * 1.5;
+          const offY    = offY0 * radialScale;
+          const offZ    = offZ0 * radialScale;
+
+          const px = baseX + xOff;
+          const py = (spineY + offY * 0.5) * mScale * outlier + offY * 0.5 + microY * outlier;
+          const pz = (spineZ + offZ * 0.5) * mScale * outlier + offZ * 0.5 + microZ * outlier;
+
+          const k = j * 3;
+          pos[k]   = px;
+          pos[k+1] = py;
+          pos[k+2] = pz;
+          base[k]  = px;
+          base[k+1]= py;
+          base[k+2]= pz;
+
+          let uColor = u;
+          if(weakenRightColor && t > 1 - fadeEndRatio){
+            uColor *= EDGE_COLOR_WEAKEN;
+          }
+          if(weakenLeftColor && t < fadeStartRatio){
+            uColor *= EDGE_COLOR_WEAKEN;
+          }
+          const mono = colorFadeStrength * uColor;
+          const sLoc = sBase * (1 - mono);
+          const lLoc = lBase * (1 - mono * 0.9);
+          tmpCol.setHSL(
+            hBase,
+            THREE.MathUtils.clamp(sLoc, 0, 1),
+            THREE.MathUtils.clamp(lLoc, 0.03, 0.9)
+          );
+          col[k]   = tmpCol.r;
+          col[k+1] = tmpCol.g;
+          col[k+2] = tmpCol.b;
+
+          mfad[j] = Math.max(0, 1 - motionFadeStrength * u);
+        }
+
+        g.setAttribute("position",      new THREE.BufferAttribute(pos, 3));
+        g.setAttribute("basePosition",  new THREE.BufferAttribute(base, 3));
+        g.setAttribute("color",         new THREE.BufferAttribute(col, 3));
+        g.setAttribute("motionFade",    new THREE.BufferAttribute(mfad, 1));
+
+        const mat = new THREE.LineBasicMaterial({
+          vertexColors: true,
+          transparent:  true,
+          opacity:      opacityBase,
+          linewidth:    1
+        });
+        const line = new THREE.Line(g, mat);
+        line.userData.animFreq  = 0.3 + mJ * 0.9 * (0.5 + Math.random());
+        line.userData.animAmp   = 0.15 + mJ * 0.4 * (0.5 + Math.random());
+        line.userData.animPhase = Math.random() * Math.PI * 2;
+        (targetGroup || resRoot).add(line);
+      }
+    }
+
+    function buildResultBundle(segments){
+      initResultScene(resBaseAzimuth);
+      clearResultBundle();
+      if (!segments || !segments.length) return;
+
+      const lengths = segments.map(seg => calcBundleLength(seg));
+      const totalLen = lengths.reduce((a, b) => a + b, 0);
+
+      const coreStarts = [];
+      const coreEnds   = [];
+      let cursor = totalLen / 2;
+
+      for(let i=0;i<segments.length;i++){
+        const len   = lengths[i];
+        const end   = cursor;
+        const start = cursor - len;
+        coreStarts.push(start);
+        coreEnds.push(end);
+        cursor = start;
+      }
+
+      const xStarts = [...coreStarts];
+      const xEnds   = [...coreEnds];
+      for(let i=0;i<segments.length - 1;i++){
+        const overlap = Math.min(lengths[i], lengths[i+1]) * OVERLAP_RATIO;
+        xStarts[i]   -= overlap * 0.5;
+        xEnds[i+1]   += overlap * 0.5;
+      }
+
+      const last = segments.length - 1;
+      for(let i=0;i<segments.length;i++){
+        generateSegmentBundle(segments[i], xStarts[i], xEnds[i], {
+          fadeStartRatio:     0.55,
+          fadeEndRatio:       0.55,
+          radiusMinRatio:     0.02,
+          noiseMinRatio:      0.04,
+          waveMinRatio:       0.05,
+          colorFadeStrength:  1.0,
+          xJitterMax:         0.9,
+          motionFadeStrength: 1.0,
+          weakenRightColor:   i === 0,
+          weakenLeftColor:    i === last
+        }, resRoot);
+      }
+      resRoot.position.set(0, 0, 0);
+    }
+
+    function tickResultScene(){
+      if (!resRenderer || !resScene || !resCamera) return;
+      const t = performance.now() * 0.001;
+      let swing = SWING_AMPLITUDE * Math.sin((2 * Math.PI * t) / SWING_PERIOD);
+      if (resDragging) swing = 0;
+      resDragOffset *= DRAG_DAMPING;
+      const az = resBaseAzimuth + swing + resDragOffset;
+      updateResultCamera(az);
+
+      for (const obj of resRoot.children) {
+        if (!(obj instanceof THREE.Line)) continue;
+        const g    = obj.geometry;
+        const base = g.getAttribute("basePosition");
+        const pos  = g.getAttribute("position");
+        const mf   = g.getAttribute("motionFade");
+        if (!base || !pos || !mf) continue;
+        const B = base.array;
+        const P = pos.array;
+        const M = mf.array;
+        const N = base.count;
+        const f  = obj.userData.animFreq  ?? 0.4;
+        const a  = obj.userData.animAmp   ?? 0.2;
+        const ph = obj.userData.animPhase ?? 0;
+        for (let i = 0; i < N; i++) {
+          const k  = i * 3;
+          const bx = B[k];
+          const by = B[k+1];
+          const bz = B[k+2];
+          const m  = M[i] ?? 1.0;
+          const dy = Math.sin(t * f      + ph + i * 0.07) * a * m;
+          const dz = Math.cos(t * f *1.3 + ph + i * 0.09) * a * 0.6 * m;
+          P[k]   = bx;
+          P[k+1] = by + dy;
+          P[k+2] = bz + dz;
+        }
+        pos.needsUpdate = true;
+      }
+      resRenderer.render(resScene, resCamera);
+    }
+
+    function openRemakeModal(){
+      if (!modalRemake) return;
+      modalRemake.hidden = false;
+      modalRemake.style.display = 'flex';
+    }
+    function closeRemakeModal(){
+      if (!modalRemake) return;
+      modalRemake.hidden = true;
+      modalRemake.style.display = 'none';
+    }
+
+      function showComplete(result){
+        latestResult = result;
+        closeRemakeModal();
+        setTimeout(closeRemakeModal, 0);
+
+        // ★ここ：画面レイヤのフェードを一瞬だけ無効化して、裏を見せない
+        document.body.classList.add('mode-switching');
+
+        setMode('mode-complete');
+
+        // phaseクラスを初期化
+        document.body.classList.remove('complete-phase1','complete-phase2','complete-phase3');
+
+        requestAnimationFrame(() => {
+          // ★次フレームで戻す（以後の演出は普通に動く）
+          document.body.classList.remove('mode-switching');
+
+          buildResultBundle(result);
+          onResultResize?.();
+
+          const BREATH_MS = 450;
+
+          setTimeout(() => {
+            document.body.classList.add('complete-phase1');
+            setTimeout(() => {
+              document.body.classList.add('complete-phase2');
+              setTimeout(() => {
+                document.body.classList.add('complete-phase3');
+              }, 420);
+            }, 520);
+          }, BREATH_MS);
+        });
+      }
+
+      if (btnRecord){
+        btnRecord.addEventListener('click', () => {
+          if (!latestResult || !Array.isArray(latestResult) || latestResult.length === 0){
+            console.warn("TimeForm: latestResult がありません");
+            return;
+          }
+
+          window.TimeFormResult = latestResult;
+          currentRecordId = null;
+          memoRecord = null;
+
+          setMode('mode-memo');
+          initMemoScreen();     // ← こいつが最終的にform.resetもやる
+        });
+      }
+
+    if (btnRemake){
+      btnRemake.addEventListener('click', () => {
+        openRemakeModal();
+      });
+    }
+    if (modalRemake){
+      modalRemake.addEventListener('click', (e) => {
+        if (e.target === modalRemake) closeRemakeModal();
+      });
+    }
+    if (remakeCancel){
+      remakeCancel.addEventListener('click', () => {
+        closeRemakeModal();
+      });
+    }
+    if (remakeOK){
+      remakeOK.addEventListener('click', () => {
+        closeRemakeModal();
+        resetAllAndBackToTimeline();
+      });
+    }
+
+    function resetAllAndBackToTimeline(){
+      handles = [];
+      gaps    = [];
+      tweens  = {};
+      drag    = null;
+      selected = -1;
+      state.handles  = [];
+      state.segments = [0,1];
+      state.values   = [];
+      state.current  = 0;
+      render2();
+      drawBand();
+      GhostBundle.set(.5,.5,.5,.5);
+      closeRemakeModal();
+      setMode('mode-timeline');
+    }
+    
+    function resetAllAndBackToIntro(){
+        // 1) タイムライン分割UI系
+        handles = [];
+        gaps    = [];
+        tweens  = {};
+        drag    = null;
+        selected = -1;
+
+        // 2) state（分割とパラメータ）
+        state.handles  = [];
+        state.segments = [0,1];
+        state.current  = 0;
+        state.values   = [];
+
+        // 3) いま作ってた束も破棄
+        latestResult = null;
+        window.TimeFormResult = null;
+        currentRecordId = null;
+        memoRecord = null;
+
+        // 4) 入力類を消す
+        try { form?.reset?.(); } catch(e){}
+        updateSaveState?.();
+
+        // 5) three.js 表示も掃除（可能な範囲で）
+        clearResultBundle?.();
+        clearMemoBundle?.();
+
+        // 6) UI再描画（必要最低限）
+        render2();
+        drawBand();
+        GhostBundle.set(.5,.5,.5,.5);
+
+        // 7) 最初へ
+        setMode('mode-intro');
+      }
+
+      document.getElementById('redo').addEventListener('click', () => {
+        // 0) もし保存して復活してるなら先に消す（使ってなければ害なし）
+        try { localStorage.removeItem('state'); } catch(e) {}
+        try { sessionStorage.removeItem('state'); } catch(e) {}
+
+        // 1) 「分け方」も含めて state を“完全に初期化”する
+        // ここが肝。あなたの state に合わせて消すキーを追加していい。
+        state.handles = [];      // ← ここ、今はコピーして残してるけど「全部リセット」なら空にする
+        state.gaps    = [];      // ← stateにあるなら
+        // state.scenes = [];    // ← もし「場面データ」がここにあるなら必ず消す
+        // state.params = {};    // ← もしパラメータがここなら消す
+        // state.memos  = {};    // ← もしメモがここなら消す
+
+        // 2) 画面側の入力も全部空にする（DOM上のinput/textarea/select）
+        document.querySelectorAll('input, textarea, select').forEach(el => {
+          const tag = el.tagName.toLowerCase();
+          const type = (el.type || '').toLowerCase();
+
+          if (tag === 'select') {
+            el.selectedIndex = 0;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+          }
+          if (type === 'checkbox' || type === 'radio') {
+            el.checked = false;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+          }
+          if (type === 'range') {
+            el.value = el.defaultValue ?? 0;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+          }
+          el.value = '';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        // 3) あなたの描画用ローカル変数も初期化（今やってるやつ）
+        handles   = [];
+        gaps      = [];
+        selected  = -1;
+
+        // 4) 再描画してタイムラインに戻す
+        render2();
+        setMode('mode-timeline');
+      });
+
+    /* ===== 5: 断片メモ画面ロジック ===== */
+    /* === 5-1: メモ画面用 束プレビュー three.js & レコード選択 === */
+
+    // 束プレビュー用 three.js
+    const memoCanvas = document.getElementById('memoBundleCanvas');
+    let memoRenderer = null, memoScene = null, memoCamera = null, memoRoot = null;
+
+    let memoRadius = 24;
+    let memoBaseAzimuth = -Math.PI / 2; // 方位固定（回さない）
+
+    function initMemoScene(){
+      if (!memoCanvas || memoRenderer) return;
+
+      memoRenderer = new THREE.WebGLRenderer({
+        canvas: memoCanvas,
+        antialias: true,
+        alpha: true
+      });
+      memoRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      memoScene  = new THREE.Scene();
+      memoCamera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
+      memoRoot   = new THREE.Group();
+      memoScene.add(memoRoot);
+
+      const amb = new THREE.AmbientLight(0xffffff, 0.9);
+      const key = new THREE.DirectionalLight(0xffffff, 0.7);
+      key.position.set(-4, 3, -6);
+      const rim = new THREE.DirectionalLight(0x90a0ff, 0.6);
+      rim.position.set(4, -2, 6);
+      memoScene.add(amb, key, rim);
+
+      onMemoResize();
+      window.addEventListener('resize', onMemoResize);
+
+      // ✅ ループは tickMemoScene だけ呼ぶ（勝手に回さない）
+      const loop = () => {
+        requestAnimationFrame(loop);
+        tickMemoScene();
+      };
+      loop();
+    }
+
+      function updateMemoCamera(){
+        if (!memoCamera) return;
+
+        const yTilt = THREE.MathUtils.degToRad(14);
+
+        const az = memoBaseAzimuth; // 固定。ドラッグ分も自動回転も無し
+
+        const x = Math.cos(az) * memoRadius;
+        const z = Math.sin(az) * memoRadius;
+        const y = Math.sin(yTilt) * memoRadius * 0.35;
+
+        memoCamera.position.set(x, y, z);
+        memoCamera.lookAt(0, 0, 0);
+      }
+
+      function onMemoResize(){
+          if (!memoRenderer || !memoCamera) return;
+          const w = memoCanvas.clientWidth  || 400;
+          const h = memoCanvas.clientHeight || 120;
+          memoRenderer.setSize(w, h, false);
+          memoCamera.aspect = w / h;
+          memoCamera.updateProjectionMatrix();
+          updateMemoCamera();
+      }
+
+    function clearMemoBundle(){
+      if (!memoRoot) return;
+      while (memoRoot.children.length){
+        const o = memoRoot.children[0];
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+        memoRoot.remove(o);
+      }
+    }
+      function fitMemoCameraToObject(padding = 1.10){
+        if (!memoRoot || !memoCamera) return;
+
+        memoRoot.updateMatrixWorld(true);
+
+        const box = new THREE.Box3().setFromObject(memoRoot);
+        if (!isFinite(box.min.x) || !isFinite(box.max.x)) return;
+
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+
+        // オブジェクトを原点に寄せる（操作安定）
+        memoRoot.position.sub(center);
+        memoRoot.updateMatrixWorld(true);
+
+        const vFov = THREE.MathUtils.degToRad(memoCamera.fov);
+        const aspect = memoCamera.aspect || 1;
+        const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+
+        const halfW = size.x / 2;
+        const halfH = size.y / 2;
+        const halfD = size.z / 2;
+
+        const distW = halfW / Math.tan(hFov / 2);
+        const distH = halfH / Math.tan(vFov / 2);
+
+        const fitDist = Math.max(distW, distH) + halfD;
+
+        memoRadius = Math.max(8, fitDist * padding);
+      }
+
+    // 完成画面の generateSegmentBundle / calcBundleLength / OVERLAP_RATIO をそのまま再利用
+    function buildMemoBundle(segments){
+      initMemoScene();
+      clearMemoBundle();
+      if (!segments || !segments.length) return;
+
+      const lengths = segments.map(seg => calcBundleLength(seg));
+      const total   = lengths.reduce((a,b)=>a+b,0);
+
+      const coreStarts = [];
+      const coreEnds   = [];
+      let cursor = total / 2;  // 右端から左へ積んでいく
+
+      for (let i=0;i<segments.length;i++){
+        const len   = lengths[i];
+        const end   = cursor;
+        const start = cursor - len;
+        coreStarts.push(start);
+        coreEnds.push(end);
+        cursor = start;
+      }
+
+      const xStarts = [...coreStarts];
+      const xEnds   = [...coreEnds];
+
+      for (let i=0;i<segments.length-1;i++){
+        const overlap = Math.min(lengths[i], lengths[i+1]) * OVERLAP_RATIO;
+        xStarts[i]   -= overlap * 0.5;
+        xEnds[i+1]   += overlap * 0.5;
+      }
+
+      const last = segments.length - 1;
+      for (let i=0;i<segments.length;i++){
+        generateSegmentBundle(segments[i], xStarts[i], xEnds[i], {
+          fadeStartRatio:     0.55,
+          fadeEndRatio:       0.55,
+          radiusMinRatio:     0.02,
+          noiseMinRatio:      0.04,
+          waveMinRatio:       0.05,
+          colorFadeStrength:  1.0,
+          xJitterMax:         0.7,
+          motionFadeStrength: 0.8,
+          weakenRightColor:   i === 0,
+          weakenLeftColor:    i === last
+        }, memoRoot);
+      }
+
+      memoRoot.position.set(0, 0, 0);
+      // ✅ 追加：束ごとに距離を自動調整して、画面内にちょうど収める
+      fitMemoCameraToObject(1.06);
+      updateMemoCamera();
+
+    }
+
+      function tickMemoScene(){
+        if (!memoRenderer || !memoScene || !memoCamera || !memoRoot) return;
+
+        const t = performance.now() * 0.001;
+        updateMemoCamera();
+
+        // ✅ 線の“うねり”アニメ（完成画面 tickResultScene と同じ方式）
+        for (const obj of memoRoot.children) {
+          if (!(obj instanceof THREE.Line)) continue;
+
+          const g    = obj.geometry;
+          const base = g.getAttribute("basePosition");
+          const pos  = g.getAttribute("position");
+          const mf   = g.getAttribute("motionFade");
+          if (!base || !pos || !mf) continue;
+
+          const B = base.array;
+          const P = pos.array;
+          const M = mf.array;
+          const N = base.count;
+
+          const f  = obj.userData.animFreq  ?? 0.4;
+          const a  = obj.userData.animAmp   ?? 0.2;
+          const ph = obj.userData.animPhase ?? 0;
+
+          for (let i = 0; i < N; i++) {
+            const k  = i * 3;
+            const bx = B[k];
+            const by = B[k+1];
+            const bz = B[k+2];
+            const m  = M[i] ?? 1.0;
+
+            const dy = Math.sin(t * f      + ph + i * 0.07) * a * m;
+            const dz = Math.cos(t * f *1.3 + ph + i * 0.09) * a * 0.6 * m;
+
+            P[k]   = bx;
+            P[k+1] = by + dy;
+            P[k+2] = bz + dz;
+          }
+          pos.needsUpdate = true;
+        }
+
+        memoRenderer.render(memoScene, memoCamera);
+      }
+
+      // この画面でいじる対象レコード
+      let memoRecord = null;
+
+      // 断片メモ画面に入るときに呼ぶ初期化
+      function initMemoScreen(){
+        if (!form) return;
+
+        const all = loadAllRecords();
+        const hasRecords = Array.isArray(all) && all.length > 0;
+
+        // ---- A. プレビューに使う「束」データを決める ----
+        let segments = null;
+
+        // 1) まず「今さっき完成させた束」を最優先で使う
+        if (latestResult && Array.isArray(latestResult) && latestResult.length){
+          segments = latestResult;
+        } else if (window.TimeFormResult &&
+                   Array.isArray(window.TimeFormResult) &&
+                   window.TimeFormResult.length){
+          segments = window.TimeFormResult;
+        }
+
+        // ---- B. メモを書き込む対象レコードを決める ----
+                   // 新規フロー判定：今作った束がある & まだ保存IDが無い
+                   const isNewFlow = (!currentRecordId) && !!segments;
+
+                   memoRecord = null;
+
+                   if (!isNewFlow && hasRecords){
+                     // 編集 or 既存閲覧のときだけ、レコードを選ぶ
+                     memoRecord = currentRecordId
+                       ? (all.find(r => r.id === currentRecordId) || all[all.length - 1])
+                       : all[all.length - 1];
+                   }
+
+
+        // レコード側に segments があって、まだ segments が決まっていなければそれも候補に
+        if (!segments &&
+            memoRecord &&
+            Array.isArray(memoRecord.segments) &&
+            memoRecord.segments.length){
+          segments = memoRecord.segments;
+        }
+
+        // ここまで来て segments が無いなら何も描けない
+        if (!segments){
+          console.warn("TimeForm memo: 表示できる束データがありません", {
+            latestResult,
+            TimeFormResult: window.TimeFormResult,
+            memoRecord
+          });
+          return;
+        }
+
+        // ---- C. 束プレビューを描画 ----
+        buildMemoBundle(segments);
+
+        // ---- D. まず必ず空にする（前の人の残骸を消す）----
+        form.reset(); // ここで毎回初期化
+
+        // ---- E. 「編集モード」だけ、既存 tags を反映 ----
+        if (memoRecord && memoRecord.tags){
+          form.elements['where'].value = memoRecord.tags.where || '';
+          form.elements['who'  ].value = memoRecord.tags.who   || '';
+          form.elements['what' ].value = memoRecord.tags.what  || '';
+          form.elements['note' ].value = memoRecord.tags.note  || '';
+        }
+
+        updateSaveState(); // reset/反映の後に呼ぶ
+      }
+
+     const form      = document.getElementById('memoForm');
+
+    const btnSkip   = document.getElementById('btnSkip');
+    const btnSave   = document.getElementById('btnSave');
+    const linesSvg  = document.getElementById('memoLines');
+    const mainWrap  = document.getElementById('memoMain');
+    const bundleBox = document.getElementById('bundleBox');
+
+    function hasAnyValue(){
+      return ['where','who','what','note'].some(
+        name => form.elements[name].value.trim() !== ''
+      );
+    }
+    function updateSaveState(){
+      btnSave.disabled = !hasAnyValue();
+    }
+      if (form){
+        form.addEventListener('input', updateSaveState);
+        updateSaveState();
+
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (btnSave.disabled) return;
+
+          const tags = {
+            where: form.elements['where'].value.trim(),
+            who:   form.elements['who'].value.trim(),
+            what:  form.elements['what'].value.trim(),
+            note:  form.elements['note'].value.trim()
+          };
+
+          // ✅ 保存するsegmentsは「今作った束」を使う（まだ保存されてない前提）
+          const segments =
+            (latestResult && Array.isArray(latestResult) && latestResult.length) ? latestResult :
+            (window.TimeFormResult && Array.isArray(window.TimeFormResult) && window.TimeFormResult.length) ? window.TimeFormResult :
+            null;
+
+          if (!segments){
+            alert("保存できる束データが見つかりませんでした。");
+            return;
+          }
+
+          // ✅ ここが「保存確定ポイント」
+          const newId = saveCurrentBundleToLocal(segments, tags);
+          if (!newId){
+            alert("保存に失敗しました。ブラウザの設定を確認してください。");
+            return;
+          }
+
+          currentRecordId = newId;
+          // ★ サムネ生成（結果キャンバスがあれば）
+          try{
+            const thumb = (resultCanvas && resultCanvas.toDataURL)
+              ? resultCanvas.toDataURL("image/webp", 0.82)
+              : "";
+            if(thumb) updateRecord(newId, { thumb });
+          }catch(e){ console.warn("thumb生成失敗", e); }
+          showGallery(newId);
+        });
+      }
+
+      if (btnSkip){
+        btnSkip.addEventListener('click', () => {
+          const ok = confirm('本当に保存せずに終わりますか？');
+          if (!ok) return;
+
+          // ✅ 保存してないので localStorage は触らない（何も増えてない前提）
+          resetAllAndBackToIntro();
+        });
+      }
+
+    function updateLines(){
+      if (!mainWrap || !linesSvg || !bundleBox) return;
+      const cRect = mainWrap.getBoundingClientRect();
+      const bRect = bundleBox.getBoundingClientRect();
+
+      const anchorX = bRect.right - cRect.left;
+      const anchorY = bRect.top + bRect.height * 0.5 - cRect.top;
+
+      const width  = cRect.width;
+      const height = cRect.height;
+
+      linesSvg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      linesSvg.setAttribute('width', width);
+      linesSvg.setAttribute('height', height);
+      linesSvg.innerHTML = '';
+
+      const fields = ['where','who','what','note'];
+
+      fields.forEach((field, idx) => {
+        const card = mainWrap.querySelector(`.memo-card[data-field="${field}"]`);
+        if (!card) return;
+        const r = card.getBoundingClientRect();
+
+        const endX = r.left - cRect.left;
+        const endY = r.top + r.height * 0.5 - cRect.top;
+
+        const FAN = 55;
+        const centerIndex = (fields.length - 1) / 2;
+        const offset = (idx - centerIndex) * FAN;
+
+        const startX = anchorX;
+        const startY = anchorY + offset;
+
+        const cornerX = endX - 80;
+        const cornerY = endY;
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute(
+          'd',
+          `M ${startX} ${startY} ` +
+          `L ${cornerX} ${cornerY} ` +
+          `L ${endX} ${endY}`
+        );
+        linesSvg.appendChild(path);
+      });
+    }
+
+    window.addEventListener('load', () => {
+      updateLines();
+      setTimeout(updateLines, 200);
+    });
+    window.addEventListener('resize', () => {
+      updateLines();
+    });
+      /* ===== 6: ギャラリー（あなたのかたち表示） ===== */
+      const galleryYourCanvas = document.getElementById('galleryYourCanvas');
+      const yourMetaEl = document.getElementById('yourMeta');
+      const btnBackToIntro = document.getElementById('btnBackToIntro');
+      const yourWhereEl = document.getElementById('yourWhere');
+      const yourWhoEl   = document.getElementById('yourWho');
+      const yourWhatEl  = document.getElementById('yourWhat');
+      const yourNoteEl  = document.getElementById('yourNote');
+
+      const allWhereEl = document.getElementById('allWhere');
+      const allWhoEl   = document.getElementById('allWho');
+      const allWhatEl  = document.getElementById('allWhat');
+      const allNoteEl  = document.getElementById('allNote');
+
+
+      let galRenderer=null, galScene=null, galCamera=null, galRoot=null;
+      let galRadius = 24;
+      let galBaseAzimuth = -Math.PI/2;
+
+      let autoOn = true;
+     
+     function setAuto(on){
+        autoOn = !!on;
+        const btnAuto = document.getElementById('btnAuto');
+        if(btnAuto){
+          btnAuto.setAttribute('aria-pressed', String(autoOn));
+          btnAuto.textContent = autoOn ? 'オート ON' : 'オート OFF';
+        }
+      }
+
+      function initGalleryScene(){
+        if (!galleryYourCanvas || galRenderer) return;
+
+        galRenderer = new THREE.WebGLRenderer({ canvas: galleryYourCanvas, antialias:true, alpha:true });
+        galRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        galScene = new THREE.Scene();
+        galCamera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
+        galRoot = new THREE.Group();
+        galScene.add(galRoot);
+
+        const amb = new THREE.AmbientLight(0xffffff, 0.9);
+        const key = new THREE.DirectionalLight(0xffffff, 0.7);
+        key.position.set(-4, 3, -6);
+        const rim = new THREE.DirectionalLight(0x90a0ff, 0.6);
+        rim.position.set(4, -2, 6);
+        galScene.add(amb, key, rim);
+
+        onGalleryResize();
+        window.addEventListener('resize', onGalleryResize);
+
+        const loop = () => {
+          requestAnimationFrame(loop);
+          tickGallery();
+          tickAllPanel();
+          tickRightStream(); // ← 右レール更新（こっちが本命）
+        };
+        loop();
+        // ===== gallery topbar buttons =====
+        const btnAuto = document.getElementById('btnAuto');
+        if(btnAuto){
+          btnAuto.addEventListener('click', ()=>{
+              setAuto(!autoOn);
+          });
+        }
+
+        const btnBackToIntro = document.getElementById('btnBackToIntro');
+        if(btnBackToIntro){
+          btnBackToIntro.addEventListener('click', ()=>{
+            setMode('mode-intro');
+          });
+        }
+      }
+
+      function onGalleryResize(){
+        if(!galRenderer || !galCamera) return;
+        const w = galleryYourCanvas.clientWidth || 640;
+        const h = galleryYourCanvas.clientHeight || 420;
+        galRenderer.setSize(w,h,false);
+        galCamera.aspect = w/h;
+        galCamera.updateProjectionMatrix();
+        updateGalleryCamera();
+      }
+
+      function updateGalleryCamera(){
+        if(!galCamera) return;
+        const yTilt = THREE.MathUtils.degToRad(14);
+        const az = galBaseAzimuth;
+
+        const x = Math.cos(az) * galRadius;
+        const z = Math.sin(az) * galRadius;
+        const y = Math.sin(yTilt) * galRadius * 0.35;
+
+        galCamera.position.set(x,y,z);
+        galCamera.lookAt(0,0,0);
+      }
+
+      function clearGalleryBundle(){
+        if(!galRoot) return;
+        while(galRoot.children.length){
+          const o = galRoot.children[0];
+          if(o.geometry) o.geometry.dispose();
+          if(o.material) o.material.dispose();
+          galRoot.remove(o);
+        }
+      }
+
+      function fitGalleryCameraToObject(padding=1.06){
+        if(!galRoot || !galCamera) return;
+
+        galRoot.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(galRoot);
+        if(!isFinite(box.min.x) || !isFinite(box.max.x)) return;
+
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+
+        galRoot.position.sub(center);
+        galRoot.updateMatrixWorld(true);
+
+        const vFov = THREE.MathUtils.degToRad(galCamera.fov);
+        const aspect = galCamera.aspect || 1;
+        const hFov = 2 * Math.atan(Math.tan(vFov/2) * aspect);
+
+        const halfW=size.x/2, halfH=size.y/2, halfD=size.z/2;
+        const distW = halfW / Math.tan(hFov/2);
+        const distH = halfH / Math.tan(vFov/2);
+        const fitDist = Math.max(distW, distH) + halfD;
+
+        galRadius = Math.max(8, fitDist * padding);
+      }
+
+      function buildGalleryYourBundle(segments){
+        initGalleryScene();
+        clearGalleryBundle();
+        if(!segments || !segments.length) return;
+
+        const lengths = segments.map(seg => calcBundleLength(seg));
+        const total   = lengths.reduce((a,b)=>a+b,0);
+
+        const coreStarts=[], coreEnds=[];
+        let cursor = total/2;
+
+        for(let i=0;i<segments.length;i++){
+          const len=lengths[i];
+          const end=cursor;
+          const start=cursor-len;
+          coreStarts.push(start);
+          coreEnds.push(end);
+          cursor=start;
+        }
+
+        const xStarts=[...coreStarts];
+        const xEnds=[...coreEnds];
+
+        for(let i=0;i<segments.length-1;i++){
+          const overlap = Math.min(lengths[i], lengths[i+1]) * OVERLAP_RATIO;
+          xStarts[i] -= overlap*0.5;
+          xEnds[i+1] += overlap*0.5;
+        }
+
+        const last = segments.length-1;
+        for(let i=0;i<segments.length;i++){
+          generateSegmentBundle(segments[i], xStarts[i], xEnds[i], {
+            fadeStartRatio:     0.55,
+            fadeEndRatio:       0.55,
+            radiusMinRatio:     0.02,
+            noiseMinRatio:      0.04,
+            waveMinRatio:       0.05,
+            colorFadeStrength:  1.0,
+            xJitterMax:         0.7,
+            motionFadeStrength: 0.9,
+            weakenRightColor:   i === 0,
+            weakenLeftColor:    i === last
+          }, galRoot);
+        }
+
+        fitGalleryCameraToObject(1.06);
+        updateGalleryCamera();
+      }
+
+      function tickGallery(){
+        if(!galRenderer || !galScene || !galCamera || !galRoot) return;
+
+        const t = performance.now()*0.001;
+        updateGalleryCamera();
+
+        // “あなたのかたち”は軽くアニメ
+        for(const obj of galRoot.children){
+          if(!(obj instanceof THREE.Line)) continue;
+          const g = obj.geometry;
+          const base = g.getAttribute("basePosition");
+          const pos  = g.getAttribute("position");
+          const mf   = g.getAttribute("motionFade");
+          if(!base || !pos || !mf) continue;
+
+          const B=base.array, P=pos.array, M=mf.array;
+          const N=base.count;
+          const f  = obj.userData.animFreq  ?? 0.4;
+          const a  = obj.userData.animAmp   ?? 0.2;
+          const ph = obj.userData.animPhase ?? 0;
+
+          for(let i=0;i<N;i++){
+            const k=i*3;
+            const bx=B[k], by=B[k+1], bz=B[k+2];
+            const m = M[i] ?? 1.0;
+            const dy = Math.sin(t*f + ph + i*0.07) * a * m;
+            const dz = Math.cos(t*f*1.3 + ph + i*0.09) * a * 0.6 * m;
+            P[k]=bx; P[k+1]=by+dy; P[k+2]=bz+dz;
+          }
+          pos.needsUpdate=true;
+        }
+
+        galRenderer.render(galScene, galCamera);
+      }
+
+      function setInfoRow(rowId, valueEl, value){
+        const row = document.getElementById(rowId);
+        if (!row || !valueEl) return;
+
+        const v = (value || '').trim();
+        valueEl.textContent = v;
+        row.style.display = v ? 'block' : 'none';
+      }
+
+      function showGallery(recordId){
+        currentRecordId = recordId || currentRecordId;
+
+        const all = loadAllRecords();
+        const rec = all.find(r => r.id === currentRecordId) || all[all.length-1];
+        if(!rec) return;
+
+        // ★ 先にモード確定（canvasサイズ計測の前提を整える）
+        setMode('mode-gallery');
+
+        // ★ テキスト類
+        if(yourMetaEl) yourMetaEl.textContent = rec.targetDate || '';
+
+        const t = rec.tags || {};
+        if (yourWhereEl) yourWhereEl.textContent = t.where || '';
+        if (yourWhoEl)   yourWhoEl.textContent   = t.who   || '';
+        if (yourWhatEl)  yourWhatEl.textContent  = t.what  || '';
+        if (yourNoteEl)  yourNoteEl.textContent  = t.note  || '';
+
+        // ★ 描画（モード確定後にやる）
+        buildGalleryYourBundle(rec.segments);
+        buildRightRailStream(all, currentRecordId);
+
+        // ★ レイアウト確定後にresizeを強制（fallback固定を回避）
+        requestAnimationFrame(()=>{
+          onGalleryResize?.();
+          onAllResize?.();
+          onRightStreamResize?.();
+        });
+      }
+      
+      function renderAdmin(){
+        const body = document.getElementById("adminBody");
+        if(!body) return;
+
+        const all = loadAllRecords()
+          .slice()
+          .sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
+
+        body.innerHTML = "";
+
+        if(!all.length){
+          body.innerHTML = `<tr><td colspan="5" style="opacity:.7;">保存データがありません。</td></tr>`;
+          return;
+        }
+
+        all.forEach(rec=>{
+          const tr = document.createElement("tr");
+
+          // 1) 体験した時間
+          const td0 = document.createElement("td");
+          td0.textContent = rec.targetDate || rec.createdAt || rec.id;
+
+          // 2) サムネ（簡易サムネを常に表示）
+          const td1 = document.createElement("td");
+          const box = document.createElement("div");
+          box.className = "adminThumb";
+
+          const img = document.createElement("img");
+          img.alt = "thumb";
+
+          // まず保存済みを使う（なければ生成）
+          let src = rec.simpleThumb || "";
+          if(!src){
+            src = makeSimpleThumb(rec);
+
+            // ついでに保存（1回だけ）
+            setTimeout(()=>{
+              const latest = loadAllRecords().find(r => r.id === rec.id);
+              if(latest && !latest.simpleThumb){
+                updateRecord(rec.id, { simpleThumb: src });
+              }
+            }, 0);
+          }
+         
+         img.addEventListener("load", () => {
+            console.log("thumb LOAD", rec.id, src.slice(0,30), src.length);
+          });
+          img.addEventListener("error", (e) => {
+            console.log("thumb ERROR", rec.id, src.slice(0,60), src.length, e);
+          });
+
+          img.src = src;
+          // ★デバッグ：srcの頭と長さを見る（最初の1件だけでOK）
+          console.log("simpleThumb head:", (src||"").slice(0, 120));
+          console.log("simpleThumb length:", (src||"").length);
+
+          img.onerror = () => {
+            console.log("IMG ERROR (simpleThumb)", (img.src||"").slice(0, 140));
+          };
+
+          // 失敗したら「NO THUMB」を出す（真っ白回避）
+          img.onerror = ()=>{
+            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`
+              <svg xmlns="http://www.w3.org/2000/svg" width="240" height="120">
+                <rect width="240" height="120" fill="rgba(255,255,255,0.06)"/>
+                <text x="12" y="64" fill="white" font-size="12" font-family="sans-serif">NO THUMB</text>
+              </svg>
+            `.trim());
+          };
+
+          box.appendChild(img);
+          td1.appendChild(box);
+
+          // 3) 断片メモ（表示だけ）
+          const td2 = document.createElement("td");
+          const t = rec.tags || {};
+          td2.textContent =
+            `どこ:${t.where||""} / だれ:${t.who||""} / なに:${t.what||""} / 一言:${t.note||""}`;
+
+          // 4) 公開トグル
+          const td3 = document.createElement("td");
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = rec.isPublic === true;
+          cb.addEventListener("change", ()=>{
+            updateRecord(rec.id, { isPublic: cb.checked });
+            buildPublicGallery(); // 公開一覧を同期
+          });
+          td3.appendChild(cb);
+
+          // 5) 操作（編集/サムネ/削除）
+          const td4 = document.createElement("td");
+          const ops = document.createElement("div");
+          ops.className = "adminOps";
+
+          // 編集（promptで最小）
+          const btnEdit = document.createElement("button");
+          btnEdit.className = "btn";
+          btnEdit.textContent = "断片メモ編集";
+          btnEdit.addEventListener("click", ()=>{
+            const where = prompt("どこ", t.where||""); if(where === null) return;
+            const who   = prompt("だれ", t.who||"");   if(who === null) return;
+            const what  = prompt("なに", t.what||"");  if(what === null) return;
+            const note  = prompt("一言", t.note||"");  if(note === null) return;
+
+            updateRecord(rec.id, { tags: { where, who, what, note } });
+            renderAdmin();
+            buildPublicGallery();
+            if(currentRecordId === rec.id) showGallery(rec.id);
+          });
+
+          // 削除
+          const btnDel = document.createElement("button");
+          btnDel.className = "btn";
+          btnDel.textContent = "保存データ削除";
+          btnDel.addEventListener("click", ()=>{
+            if(!confirm("削除します。戻せません。OK？")) return;
+            deleteRecord(rec.id);
+            renderAdmin();
+            buildPublicGallery();
+          });
+
+          ops.append(btnEdit, btnDel);
+          td4.appendChild(ops);
+
+          tr.append(td0, td1, td2, td3, td4);
+          body.appendChild(tr);
+          
+          img.onerror = (e)=> console.log("thumb img error", rec.id, src.slice(0,80), e);
+
+        });
+      }
+
+      function buildPublicGallery(){
+        const grid = document.getElementById("publicGrid");
+        if(!grid) return;
+
+        const all = loadAllRecords();
+        const pubs = all.filter(r => r.isPublic === true);
+
+        grid.innerHTML = "";
+
+        if(!pubs.length){
+          grid.textContent = "公開されている束はまだありません。";
+          return;
+        }
+
+        pubs.sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
+
+        pubs.forEach(rec=>{
+          const card = document.createElement("div");
+          card.className = "pubCard";
+
+          const th = document.createElement("div");
+          th.className = "pubCard__thumb";
+          if(rec.thumb){
+            const img = document.createElement("img");
+            img.src = rec.thumb;
+            img.alt = "thumb";
+            th.appendChild(img);
+          }
+
+          const meta = document.createElement("div");
+          meta.className = "pubCard__meta";
+          meta.innerHTML = `
+            <div class="pubCard__date">${rec.targetDate || ""}</div>
+            <div>${(rec.tags?.note || "").trim() || "（一言なし）"}</div>
+          `;
+
+          card.appendChild(th);
+          card.appendChild(meta);
+
+          // クリックしたら「その束を表示」
+          card.addEventListener("click", ()=>{
+            showGallery(rec.id);
+          });
+
+          grid.appendChild(card);
+        });
+      }
+
+      (function setupAdminEgg(){
+        const egg = document.getElementById("adminEasterEgg");
+        if(!egg) return;
+
+        let n = 0;
+        let timer = null;
+
+        egg.addEventListener("click", ()=>{
+          n++;
+          clearTimeout(timer);
+          timer = setTimeout(()=>{ n = 0; }, 1200);
+
+          if(n >= 5){
+            n = 0;
+            clearTimeout(timer);
+            setMode("mode-admin");
+            renderAdmin?.(); // 後で作る
+          }
+        });
+      })();
+      
+      document.getElementById("adminBack")?.addEventListener("click", ()=>{
+        setMode("mode-gallery");
+        buildPublicGallery();
+      });
+
+      // ===== “みんなのかたち” 表示（真ん中の束） =====
+      const galleryAllCanvas = document.getElementById('galleryAllCanvas');
+      const allMetaEl = document.getElementById('allMeta');
+      const allTagsEl = document.getElementById('allTags');
+
+      let allRenderer=null, allScene=null, allCamera=null, allRoot=null;
+      let allRadius = 24;
+      let allBaseAzimuth = -Math.PI/2;
+
+      function initAllScene(){
+        if(!galleryAllCanvas || allRenderer) return;
+
+        allRenderer = new THREE.WebGLRenderer({ canvas: galleryAllCanvas, antialias:true, alpha:true });
+        allRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        allScene = new THREE.Scene();
+        allCamera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
+        allRoot = new THREE.Group();
+        allScene.add(allRoot);
+
+        const amb = new THREE.AmbientLight(0xffffff, 0.9);
+        const key = new THREE.DirectionalLight(0xffffff, 0.7);
+        key.position.set(-4, 3, -6);
+        const rim = new THREE.DirectionalLight(0x90a0ff, 0.6);
+        rim.position.set(4, -2, 6);
+        allScene.add(amb, key, rim);
+
+        onAllResize();
+        window.addEventListener('resize', onAllResize);
+      }
+
+      function onAllResize(){
+        if(!allRenderer || !allCamera) return;
+        const w = galleryAllCanvas.clientWidth || 640;
+        const h = galleryAllCanvas.clientHeight || 420;
+        allRenderer.setSize(w,h,false);
+        allCamera.aspect = w/h;
+        allCamera.updateProjectionMatrix();
+        updateAllCamera();
+      }
+
+      function updateAllCamera(){
+        if(!allCamera) return;
+        const yTilt = THREE.MathUtils.degToRad(14);
+        const az = allBaseAzimuth;
+        const x = Math.cos(az) * allRadius;
+        const z = Math.sin(az) * allRadius;
+        const y = Math.sin(yTilt) * allRadius * 0.35;
+        allCamera.position.set(x,y,z);
+        allCamera.lookAt(0,0,0);
+      }
+
+      function clearAllBundle(){
+        if(!allRoot) return;
+        while(allRoot.children.length){
+          const o = allRoot.children[0];
+          o.geometry?.dispose?.();
+          o.material?.dispose?.();
+          allRoot.remove(o);
+        }
+      }
+
+      function fitAllCameraToObject(padding=1.06){
+        if(!allRoot || !allCamera) return;
+        allRoot.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(allRoot);
+        if(!isFinite(box.min.x) || !isFinite(box.max.x)) return;
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        allRoot.position.sub(center);
+        allRoot.updateMatrixWorld(true);
+
+        const vFov = THREE.MathUtils.degToRad(allCamera.fov);
+        const aspect = allCamera.aspect || 1;
+        const hFov = 2 * Math.atan(Math.tan(vFov/2) * aspect);
+        const halfW=size.x/2, halfH=size.y/2, halfD=size.z/2;
+        const distW = halfW / Math.tan(hFov/2);
+        const distH = halfH / Math.tan(vFov/2);
+        const fitDist = Math.max(distW, distH) + halfD;
+        allRadius = Math.max(8, fitDist * padding);
+      }
+
+      function buildAllBundle(segments){
+        initAllScene();
+        clearAllBundle();
+        if(!segments || !segments.length) return;
+
+        const lengths = segments.map(seg => calcBundleLength(seg));
+        const total   = lengths.reduce((a,b)=>a+b,0);
+
+        const coreStarts=[], coreEnds=[];
+        let cursor = total/2;
+        for(let i=0;i<segments.length;i++){
+          const len=lengths[i];
+          const end=cursor;
+          const start=cursor-len;
+          coreStarts.push(start);
+          coreEnds.push(end);
+          cursor=start;
+        }
+
+        const xStarts=[...coreStarts];
+        const xEnds=[...coreEnds];
+        for(let i=0;i<segments.length-1;i++){
+          const overlap = Math.min(lengths[i], lengths[i+1]) * OVERLAP_RATIO;
+          xStarts[i] -= overlap*0.5;
+          xEnds[i+1] += overlap*0.5;
+        }
+
+        const last = segments.length-1;
+        for(let i=0;i<segments.length;i++){
+          generateSegmentBundle(segments[i], xStarts[i], xEnds[i], {
+            baseLines: 22,
+            segsPer: 64,
+            xJitterMax: 0.6,
+            motionFadeStrength: 0.95,
+            weakenRightColor: i===0,
+            weakenLeftColor:  i===last
+          }, allRoot);
+        }
+
+        fitAllCameraToObject(1.06);
+        updateAllCamera();
+      }
+
+      function tickAllPanel(){
+        if(!allRenderer || !allScene || !allCamera || !allRoot) return;
+        const t = performance.now()*0.001;
+        updateAllCamera();
+
+        for(const obj of allRoot.children){
+          if(!(obj instanceof THREE.Line)) continue;
+          const g = obj.geometry;
+          const base = g.getAttribute("basePosition");
+          const pos  = g.getAttribute("position");
+          const mf   = g.getAttribute("motionFade");
+          if(!base || !pos || !mf) continue;
+
+          const B=base.array, P=pos.array, M=mf.array;
+          const N=base.count;
+          const f  = obj.userData.animFreq  ?? 0.4;
+          const a  = obj.userData.animAmp   ?? 0.2;
+          const ph = obj.userData.animPhase ?? 0;
+
+          for(let i=0;i<N;i++){
+            const k=i*3;
+            const bx=B[k], by=B[k+1], bz=B[k+2];
+            const m = M[i] ?? 1.0;
+            const dy = Math.sin(t*f + ph + i*0.07) * a * m;
+            const dz = Math.cos(t*f*1.3 + ph + i*0.09) * a * 0.6 * m;
+            P[k]=bx; P[k+1]=by+dy; P[k+2]=bz+dz;
+          }
+          pos.needsUpdate=true;
+        }
+
+        allRenderer.render(allScene, allCamera);
+      }
+
+      function showAllPanelRecord(rec){
+        if(!rec){
+          if(allMetaEl) allMetaEl.textContent = '';
+
+          // 「まだありません」表示（どこに出すか決める）
+          if(allWhereEl) allWhereEl.textContent = '';
+          if(allWhoEl)   allWhoEl.textContent   = '';
+          if(allWhatEl)  allWhatEl.textContent  = '';
+          if(allNoteEl)  allNoteEl.textContent  = 'まだ「みんなの記録」がありません';
+
+          initAllScene();
+          clearAllBundle();
+          allRenderer?.render(allScene, allCamera);
+          return;
+        }
+
+        if(allMetaEl) allMetaEl.textContent = rec.targetDate || '';
+
+        const t = rec.tags || {};
+        if(allWhereEl) allWhereEl.textContent = t.where || '';
+        if(allWhoEl)   allWhoEl.textContent   = t.who   || '';
+        if(allWhatEl)  allWhatEl.textContent  = t.what  || '';
+        if(allNoteEl)  allNoteEl.textContent  = t.note  || '';
+
+        buildAllBundle(rec.segments);
+      }
+
+      // 右レール用：軽量な束グループを1件ぶん生成して返す
+      function buildOneLiteGroupForRail(rec){
+        const wrapper = new THREE.Group();
+        const g = new THREE.Group();
+        wrapper.add(g);
+
+        const segs = rec?.segments;
+        if(!Array.isArray(segs) || !segs.length){
+          wrapper.userData.rawSize = new THREE.Vector3(1,1,1);
+          return wrapper;
+        }
+
+        // buildAllBundle / buildMemoBundle と同じ積み方でOK（軽量化だけする）
+        const lengths = segs.map(seg => calcBundleLength(seg));
+        const total   = lengths.reduce((a,b)=>a+b,0);
+
+        const coreStarts=[], coreEnds=[];
+        let cursor = total/2;
+
+        for(let i=0;i<segs.length;i++){
+          const len = lengths[i];
+          const end = cursor;
+          const start = cursor - len;
+          coreStarts.push(start);
+          coreEnds.push(end);
+          cursor = start;
+        }
+
+        const xStarts=[...coreStarts];
+        const xEnds=[...coreEnds];
+
+        for(let i=0;i<segs.length-1;i++){
+          const overlap = Math.min(lengths[i], lengths[i+1]) * OVERLAP_RATIO;
+          xStarts[i] -= overlap*0.5;
+          xEnds[i+1] += overlap*0.5;
+        }
+
+        const last = segs.length - 1;
+        for(let i=0;i<segs.length;i++){
+          generateSegmentBundle(segs[i], xStarts[i], xEnds[i], {
+            // ★軽量化パラメータ
+            baseLines: 10,       // 少なめ
+            segsPer: 36,         // 点数少なめ
+            xJitterMax: 0.35,    // 暴れ抑える
+            motionFadeStrength: 0.98,
+
+            // 端の収束はそのまま
+            fadeStartRatio: 0.60,
+            fadeEndRatio:   0.60,
+            radiusMinRatio: 0.08,
+            noiseMinRatio:  0.10,
+            waveMinRatio:   0.12,
+
+            weakenRightColor: i === 0,
+            weakenLeftColor:  i === last
+          }, g);
+        }
+
+        // サイズ計測して、中心に寄せる（wrapperの中で）
+        g.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(g);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        g.position.sub(center);
+
+        wrapper.userData.rawSize = size;
+        return wrapper;
+      }
+
+      /* ===== 6B: 右端レール（みんな：最大7、均等、真ん中を選択） ===== */
+      const rightStreamCanvas = document.getElementById('rightStreamCanvas');
+
+      let rsRenderer=null, rsScene=null, rsCamera=null, rsRoot=null;
+      let rsLastT = performance.now() * 0.001;
+
+      // 仕様：最大7
+      const RS_SLOTS  = 7;
+
+      // 見た目のチューニング
+      const RS_VIEW_H = 44;        // 見える縦幅（world）
+      const RS_SLOT_H = 6.0;       // 1束が占める高さの目安
+      const RS_SPEED  = RS_VIEW_H / 70; // “ゆっくり” = 1周70秒くらい
+
+      let rsTopY=0, rsBottomY=0;
+      let rsGroups = [];
+      let rsSelectedId = null;
+      let rsScroll = 0;     // ← 回転寿司の“回転量”
+      let rsStep   = 0;     // ← スロット間隔
+      let rsPeriod = 0;     // ← 1周ぶん
+
+      // 「真ん中の束」を左の“みんな”枠に出すための参照（後で定義する関数を呼ぶ）
+      function rsPickCenterAndSync(){
+        if(!rsGroups.length){
+          rsSelectedId = null;
+          showAllPanelRecord(null);
+          return;
+        }
+        let best = null;
+        let bestD = Infinity;
+        for(const g of rsGroups){
+          const d = Math.abs(g.position.y - 0); // 画面中心は y=0
+          if(d < bestD){
+            bestD = d;
+            best = g;
+          }
+        }
+        const rec = best?.userData?.record || null;
+        const id = rec?.id || null;
+        if(id !== rsSelectedId){
+          rsSelectedId = id;
+          showAllPanelRecord(rec);
+        }
+      }
+
+      function initRightStreamScene(){
+        if(!rightStreamCanvas || rsRenderer) return;
+
+        rsRenderer = new THREE.WebGLRenderer({ canvas:rightStreamCanvas, antialias:true, alpha:true });
+        rsRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        rsScene = new THREE.Scene();
+        rsRoot  = new THREE.Group();
+        rsScene.add(rsRoot);
+
+        rsCamera = new THREE.OrthographicCamera(-10,10,10,-10, 0.1, 2000);
+        rsCamera.position.set(0,0,-80);
+        rsCamera.lookAt(0,0,0);
+
+        const amb = new THREE.AmbientLight(0xffffff, 0.92);
+        const key = new THREE.DirectionalLight(0xffffff, 0.65);
+        key.position.set(-4, 3, 6);
+        const rim = new THREE.DirectionalLight(0x90a0ff, 0.45);
+        rim.position.set(4, -2, -6);
+        rsScene.add(amb, key, rim);
+
+        onRightStreamResize();
+        window.addEventListener('resize', onRightStreamResize);
+      }
+
+      // ===== 右レール：ドラッグでスクラブ =====
+      let rsDragging = false;
+      let rsLastY = 0;
+      let rsPointerId = null;
+
+      function rsWorldPerPixel(){
+        if(!rsCamera || !rightStreamCanvas) return 0.02;
+        const viewH = (rsCamera.top - rsCamera.bottom) || RS_VIEW_H;
+        const h = rightStreamCanvas.clientHeight || 600;
+        return viewH / h;
+      }
+
+      if (rightStreamCanvas) {
+        rightStreamCanvas.addEventListener('pointerdown', (e) => {
+          if (!rsGroups.length) return;
+          rsDragging = true;
+          rsLastY = e.clientY;
+          rsPointerId = e.pointerId;
+          rightStreamCanvas.setPointerCapture(rsPointerId);
+          rightStreamCanvas.classList.add('dragging');
+        });
+
+        rightStreamCanvas.addEventListener('pointermove', (e) => {
+          if (!rsDragging) return;
+          if (rsPointerId != null && e.pointerId !== rsPointerId) return;
+
+          const dy = e.clientY - rsLastY;
+          rsLastY = e.clientY;
+
+          const k = rsWorldPerPixel();
+          rsScroll += dy * k;
+
+          rsPickCenterAndSync();
+        });
+
+        const endDrag = () => {
+          if (!rsDragging) return;
+          rsDragging = false;
+          try {
+            if (rsPointerId != null) rightStreamCanvas.releasePointerCapture(rsPointerId);
+          } catch (_) {}
+          rsPointerId = null;
+          rightStreamCanvas.classList.remove('dragging');
+        };
+
+        rightStreamCanvas.addEventListener('pointerup', endDrag);
+        rightStreamCanvas.addEventListener('pointercancel', endDrag);
+
+        rightStreamCanvas.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const k = rsWorldPerPixel();
+          rsScroll += e.deltaY * k * 0.6;
+          rsPickCenterAndSync();
+        }, { passive: false });
+      }
+
+      function onRightStreamResize(){
+        if(!rsRenderer || !rsCamera || !rightStreamCanvas) return;
+
+        const w = rightStreamCanvas.clientWidth  || 280;
+        const h = rightStreamCanvas.clientHeight || 600;
+
+        rsRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        rsRenderer.setSize(w, h, false);
+
+        const aspect = w / h;
+        const rsViewH = RS_VIEW_H;
+        const rsViewW = Math.max(rsViewH * aspect, 22);
+
+        rsCamera.left   = -rsViewW / 2;
+        rsCamera.right  =  rsViewW / 2;
+        rsCamera.top    =  rsViewH / 2;
+        rsCamera.bottom = -rsViewH / 2;
+        rsCamera.updateProjectionMatrix();
+
+        // ✅ ここが重要：共通スケールを作り直して、今入ってるinstにだけ反映
+        rsRecomputeCommonScale();
+        for(const slot of rsGroups){
+          const inst = slot.children[0];
+          if(inst) inst.scale.setScalar(rsCommonScale);
+        }
+      }
+
+      function clearRightStream(){
+        if(!rsRoot) return;
+        while(rsRoot.children.length){
+          const o = rsRoot.children[0];
+          // wrapperの中にLineがいるので dispose は深追いしない（重い）/ したければ traverseで
+          rsRoot.remove(o);
+        }
+        rsGroups = [];
+      }
+    
+    // ===== 右レーン：公開プールを無限回転させるための状態 =====
+      let rsPool = [];          // 公開レコード全件（上限なし）
+      let rsPoolLen = 0;
+
+      let rsSlotCount = RS_SLOTS;     // 表示枠は常に7（固定）
+      let rsCommonScale = 1.0;        // 右レーン共通スケール
+      let rsMaxSize = new THREE.Vector3(1e-6, 1e-6, 1e-6);
+
+      // 軽量3Dの元データをキャッシュ（id -> baseGroup）
+      const rsLiteCache = new Map();
+
+      function rsGetBaseGroup(rec){
+        const id = rec?.id;
+        if(!id) return null;
+
+        if(rsLiteCache.has(id)) return rsLiteCache.get(id);
+
+        const base = buildOneLiteGroupForRail(rec); // 既存関数：軽量束を作る
+        base.userData.record = rec;
+
+        // 最大サイズを更新（後で共通スケールに使う）
+        const s = base.userData.rawSize || new THREE.Vector3(1,1,1);
+        rsMaxSize.x = Math.max(rsMaxSize.x, s.x || 0);
+        rsMaxSize.y = Math.max(rsMaxSize.y, s.y || 0);
+        rsMaxSize.z = Math.max(rsMaxSize.z, s.z || 0);
+
+        rsLiteCache.set(id, base);
+        return base;
+      }
+
+      function rsRecomputeCommonScale(){
+        if(!rsCamera) return;
+
+        const viewW  = (rsCamera.right - rsCamera.left);
+        const availW = viewW * 0.86;        // 横は少し余白
+        const availH = RS_SLOT_H * 0.78;    // 縦はスロット内に収めたい
+
+        const maxX = Math.max(1e-6, rsMaxSize.x);
+        const maxH = Math.max(1e-6, Math.max(rsMaxSize.y, rsMaxSize.z * 0.85));
+
+        rsCommonScale = Math.max(1e-6, Math.min(availW / maxX, availH / maxH) * 0.86);
+      }
+      
+      function rsBakeStaticThumb(group){
+        if(!group) return;
+
+        group.traverse(obj=>{
+          // three.js: Line 判定（isLine が一番安全）
+          if(!obj || !obj.isLine) return;
+
+          const geom = obj.geometry;
+          if(!geom || !geom.getAttribute) return;
+
+          const base = geom.getAttribute("basePosition");
+          if(!base || !base.array) return;
+
+          const pos = geom.getAttribute("position");
+          if(!pos || !pos.array) return;
+
+          // 念のため長さが一致する時だけコピー（ズレると例外/破綻の元）
+          if(pos.array.length !== base.array.length) return;
+
+          pos.array.set(base.array);
+          pos.needsUpdate = true;
+        });
+      }
+
+      function rsSetSlotContent(slotWrapper, rec){
+        if(!slotWrapper) return;
+
+        const nextId = rec?.id || null;
+        if(slotWrapper.userData.recId === nextId) return; // 変化なしなら何もしない
+
+        // いったん中身を空にする
+        while(slotWrapper.children.length) slotWrapper.remove(slotWrapper.children[0]);
+
+        slotWrapper.userData.recId   = nextId;
+        slotWrapper.userData.record  = rec || null;
+
+        if(!rec) return;
+
+        // baseGroup を取得 → cloneしてスロットに入れる（7枠同時表示のため clone を使う）
+        const base = rsGetBaseGroup(rec);
+        if(!base) return;
+
+        const inst = base.clone(true);
+        inst.scale.setScalar(rsCommonScale);
+        rsBakeStaticThumb(inst);
+        slotWrapper.add(inst);
+      }
+
+      function buildRightRailStream(records, excludeId){
+        initRightStreamScene();
+        clearRightStream();
+
+        const all = Array.isArray(records) ? records : [];
+
+        // ✅ 公開だけをプールにする（上限なし）
+        // いったん「あなた以外」を優先（公開が自分だけなら後でフォールバック）
+        let pool = all.filter(r => r && r.isPublic === true && r.id !== excludeId);
+
+        // 公開が「あなたしかない」ケースは、あなた含めて回す
+        if(!pool.length){
+          pool = all.filter(r => r && r.isPublic === true);
+        }
+
+        // それでも0なら空
+        pool = pool
+          .slice()
+          .sort((a,b)=> (b.createdAt || b.id || "").localeCompare(a.createdAt || a.id || ""));
+
+        rsPool = pool;
+        rsPoolLen = rsPool.length;
+
+        if(!rsPoolLen){
+          rsSelectedId = null;
+          showAllPanelRecord(null);
+          return;
+        }
+
+        // 表示枠は7固定（ただし pool が少ないなら同じものが周回して見えるだけ）
+        rsSlotCount = RS_SLOTS;
+
+        // 回転寿司の幾何設定
+        rsStep   = RS_SLOT_H;
+        rsPeriod = rsStep * rsSlotCount;
+        rsScroll = 0;
+
+        rsTopY    = RS_VIEW_H/2 - rsStep/2;
+        rsBottomY = -rsTopY;
+
+        // 7枠の“スロット”を作る（中身は tick で差し替え）
+        const mid = (rsSlotCount - 1) / 2;
+        rsGroups = [];
+
+        for(let i=0;i<rsSlotCount;i++){
+          const slot = new THREE.Group();
+          slot.userData.slotIndex = i;
+          slot.userData.baseY = (i - mid) * rsStep;
+          slot.position.set(0, slot.userData.baseY, 0);
+          rsRoot.add(slot);
+          rsGroups.push(slot);
+        }
+
+        // 初期スケール計算：まずは最初の7件だけ prewarm（全部は重いので）
+        rsMaxSize.set(1e-6, 1e-6, 1e-6);
+        for(let i=0;i<Math.min(rsPoolLen, rsSlotCount);i++){
+          rsGetBaseGroup(rsPool[i]);
+        }
+        rsRecomputeCommonScale();
+
+        // 初期内容をセット（slotIndexに応じてプールから入れる）
+        for(const slot of rsGroups){
+          const i = slot.userData.slotIndex || 0;
+          const rec = rsPool[i % rsPoolLen];
+          rsSetSlotContent(slot, rec);
+        }
+
+        rsPickCenterAndSync();
+      }
+
+
+      function rsWrapY(y){
+        const hi = rsTopY + rsStep * 0.5;
+        const lo = rsBottomY - rsStep * 0.5;
+        const p  = rsPeriod || (hi - lo + rsStep);
+
+        while(y < lo) y += p;
+        while(y > hi) y -= p;
+        return y;
+      }
+
+      function tickRightStream(){
+        if(!rsRenderer || !rsScene || !rsCamera || !rsRoot) return;
+        if(!rsPoolLen || !rsGroups.length){
+          rsRenderer.render(rsScene, rsCamera);
+          return;
+        }
+
+        const now = performance.now() * 0.001;
+        const dt  = Math.min(0.05, Math.max(0, now - rsLastT));
+        rsLastT = now;
+
+        // オートONかつドラッグ中じゃない時だけ進む
+        if(autoOn && !rsDragging){
+          rsScroll += RS_SPEED * dt;
+        }
+
+        // 何ステップ進んだか（負もありえる）
+        const offsetSteps = Math.floor(rsScroll / rsStep);
+
+        // スケールが更新されたら全スロットに反映するためのフラグ
+        let scaleChanged = false;
+        const prevScale = rsCommonScale;
+
+        for(const slot of rsGroups){
+          const i = slot.userData.slotIndex || 0;
+
+          // 位置は“ベルト”としてぐるぐる回す
+          const baseY = slot.userData.baseY ?? 0;
+          slot.position.y = rsWrapY(baseY - rsScroll);
+
+          // ちょい揺れ（見た目用）
+          slot.rotation.y = Math.sin(now * 0.25 + i) * 0.04;
+
+          // このスロットが今表示すべきレコード（プール全件を周回）
+          const idx = ((i + offsetSteps) % rsPoolLen + rsPoolLen) % rsPoolLen;
+          const rec = rsPool[idx];
+
+          // 初めて出てくるレコードならサイズ更新→共通スケール再計算
+          rsGetBaseGroup(rec);
+          rsRecomputeCommonScale();
+          if(rsCommonScale !== prevScale) scaleChanged = true;
+
+          // 内容差し替え（同じなら何もしない）
+          rsSetSlotContent(slot, rec);
+        }
+
+        // スケールが変わったなら、今入ってる子にも反映（rsSetSlotContentは新規には反映済み）
+        if(scaleChanged){
+          for(const slot of rsGroups){
+            const child = slot.children[0];
+            if(child) child.scale.setScalar(rsCommonScale);
+          }
+        }
+
+        rsPickCenterAndSync();
+        rsRenderer.render(rsScene, rsCamera);
+      }
+     
+     function rsTickLiteLines(t){
+        if(!rsRoot) return;
+
+        rsRoot.traverse(obj=>{
+          if(!(obj instanceof THREE.Line)) return;
+
+          const g = obj.geometry;
+          const base = g.getAttribute("basePosition");
+          const pos  = g.getAttribute("position");
+          const mf   = g.getAttribute("motionFade");
+          if(!base || !pos) return;
+
+          const B = base.array;
+          const P = pos.array;
+          const M = mf ? mf.array : null;
+          const N = base.count;
+
+          // all より軽めの揺れ
+          const f  = (obj.userData.animFreq  ?? 0.45);
+          const a  = (obj.userData.animAmp   ?? 0.12);
+          const ph = (obj.userData.animPhase ?? 0.0);
+
+          for(let i=0;i<N;i++){
+            const k = i*3;
+            const bx = B[k], by = B[k+1], bz = B[k+2];
+            const m  = M ? (M[i] ?? 1.0) : 1.0;
+
+            const dy = Math.sin(t*f + ph + i*0.07) * a * m;
+            const dz = Math.cos(t*f*1.3 + ph + i*0.09) * a * 0.6 * m;
+
+            P[k]   = bx;
+            P[k+1] = by + dy;
+            P[k+2] = bz + dz;
+          }
+          pos.needsUpdate = true;
+        });
+      }
+
+  </script>
+
+  <!-- パラメータ画面の微調整用スタイル -->
+  <style id="params-tune">
+    :root{
+      --title-size: 25px;
+      --title-lh: 1.45;
+      --title-mt: 8px;
+      --title-mb: 22px;
+      --band-offset: 20px;
+      --counter-size: 14px;
+      --counter-top: -16px;
+      --sliders-width: 80%;
+      --rows-gap: 8px;
+      --label-size: 16px;
+      --tips-size: 13px;
+    }
+    .screen--params .hero-title{
+      text-align:center;
+      font-size:var(--title-size);
+      line-height:var(--title-lh);
+      margin: var(--title-mt) 0 var(--title-mb);
+      font-weight:500;
+    }
+    .screen--params .hero-title .l1,
+    .screen--params .hero-title .l2{ white-space:nowrap; }
+    .screen--params .bandWrap{
+      width: var(--sliders-width);
+      margin: var(--band-offset) auto 0;
+      position: relative;
+    }
+    .screen--params .scene-counter{
+      position:absolute;
+      left:50%; transform:translateX(-50%);
+      top: var(--counter-top);
+      font-size: var(--counter-size);
+      font-weight:500;
+    }
+    .screen--params .sliders{ width: var(--sliders-width); margin: 18px auto 0; }
+    .screen--params .sliders .row{ margin: var(--rows-gap) 0; }
+    .screen--params .sliders .label{
+      margin: 0 0 8px;
+      text-align:center;
+      font-size: var(--label-size);
+      font-weight:500;
+    }
+    .screen--params .sliders .tips{
+      display:flex; justify-content:space-between;
+      margin-top:6px; font-size: var(--tips-size); opacity:.8;
+    }
+  </style>
+</body>
+</html>
