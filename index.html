@@ -898,6 +898,43 @@
                     text-overflow:ellipsis;
                     width:100%;
                 }
+
+                .g-empty{
+                    display:none;
+                    flex-direction:column;
+                    align-items:flex-start;
+                    gap:12px;
+                    margin-top:2px;
+                }
+
+                .g-empty.is-visible{
+                    display:flex;
+                }
+
+                .g-empty__text{
+                    font-size:13px;
+                    font-weight:300;
+                    color:rgba(255,255,255,.78);
+                    text-shadow:0 0 16px rgba(0,0,0,.65);
+                    white-space:normal;
+                    line-height:1.6;
+                }
+
+                .g-empty__btn{
+                    border-radius:999px;
+                    border:1px solid rgba(255,255,255,.28);
+                    background:rgba(255,255,255,.10);
+                    color:rgba(255,255,255,.92);
+                    padding:8px 18px;
+                    font-size:12px;
+                    font-weight:500;
+                    cursor:pointer;
+                    box-shadow:0 10px 28px rgba(0,0,0,.22);
+                }
+
+                .g-empty__btn:hover{
+                    background:rgba(255,255,255,.16);
+                }
                 /* =========================================================
                    TimeForm UI: Type + Button System v2 (drop-in override)
                    要望反映：幅短め / 見出し統一 / 「完成！」色替え / 1/1中央寄せ
@@ -1757,6 +1794,10 @@
               <div class="g-line" id="yourWhatRow"><span id="yourWhat"></span></div>
               <div class="g-line" id="yourNoteRow"><span id="yourNote"></span></div>
             </div>
+            <div class="g-empty" id="yourEmptyState">
+              <div class="g-empty__text">あなたのかたちはまだありません</div>
+              <button class="g-empty__btn" id="btnCreateFromGallery" type="button">作ってみる</button>
+            </div>
           </div>
 
           <div class="g-stage g-stage--big">
@@ -2368,24 +2409,8 @@
           return;
         }
 
-        // 記録ゼロでも破綻しない最低限の空表示
-        if (typeof clearGalleryBundle === 'function') clearGalleryBundle();
-        if (typeof clearAllBundle === 'function') clearAllBundle();
-
-        if (typeof yourMetaEl !== 'undefined' && yourMetaEl)  yourMetaEl.textContent  = '';
-        if (typeof yourWhereEl !== 'undefined' && yourWhereEl) yourWhereEl.textContent = '';
-        if (typeof yourWhoEl !== 'undefined' && yourWhoEl)   yourWhoEl.textContent   = '';
-        if (typeof yourWhatEl !== 'undefined' && yourWhatEl)  yourWhatEl.textContent  = '';
-        if (typeof yourNoteEl !== 'undefined' && yourNoteEl)  yourNoteEl.textContent  = 'あなたのかたちはまだありません';
-
-        if (typeof buildRightRailStream === 'function') buildRightRailStream([], null);
-
-        requestAnimationFrame(() => {
-          onGalleryResize?.();
-          onAllResize?.();
-          onRightStreamResize?.();
-        });
-      });
+        showGalleryOverview([]);
+    });
 
 
     /* --- 2: 分割UI --- */
@@ -3760,6 +3785,8 @@
       const yourWhoEl   = document.getElementById('yourWho');
       const yourWhatEl  = document.getElementById('yourWhat');
       const yourNoteEl  = document.getElementById('yourNote');
+      const yourEmptyStateEl = document.getElementById('yourEmptyState');
+      const btnCreateFromGallery = document.getElementById('btnCreateFromGallery');
 
       const allWhereEl = document.getElementById('allWhere');
       const allWhoEl   = document.getElementById('allWho');
@@ -3822,6 +3849,12 @@
         if(btnBackToIntro){
           btnBackToIntro.addEventListener('click', ()=>{
             setMode('mode-intro');
+          });
+        }
+
+        if(btnCreateFromGallery){
+          btnCreateFromGallery.addEventListener('click', ()=>{
+            setMode('mode-timeline');
           });
         }
       }
@@ -3977,6 +4010,12 @@
         row.style.display = v ? 'block' : 'none';
       }
 
+      function setYourEmptyState(isVisible){
+        if(yourEmptyStateEl){
+          yourEmptyStateEl.classList.toggle('is-visible', Boolean(isVisible));
+        }
+      }
+
       function showGallery(recordId){
         currentRecordId = recordId || currentRecordId;
 
@@ -3986,6 +4025,7 @@
 
         // ★ 先にモード確定（canvasサイズ計測の前提を整える）
         setMode('mode-gallery');
+        setYourEmptyState(false);
 
         // ★ テキスト類
         if(yourMetaEl) yourMetaEl.textContent = rec.targetDate || '';
@@ -4013,12 +4053,13 @@
         currentRecordId = null;
 
         setMode('mode-gallery');
+        setYourEmptyState(true);
 
         if(yourMetaEl) yourMetaEl.textContent = '';
         setInfoRow('yourWhereRow', yourWhereEl, '');
         setInfoRow('yourWhoRow', yourWhoEl, '');
         setInfoRow('yourWhatRow', yourWhatEl, '');
-        setInfoRow('yourNoteRow', yourNoteEl, 'この端末で作った「あなたのかたち」はまだありません');
+        setInfoRow('yourNoteRow', yourNoteEl, '');
 
         initGalleryScene();
         clearGalleryBundle();
