@@ -271,12 +271,19 @@
                     display:flex;
                     flex-direction:column;
                     align-items:center;
-                    justify-content:center;
-                    gap:24px;
-                    min-height:58vh;
+                    gap:32px;
                 }
                 .bundle-frame{
-                    display:none !important;
+                    width:100%;
+                    max-width:none;
+                    height: min(70vh, 520px);
+                    border-radius:0;
+                    background:transparent;
+                    box-shadow:none;
+                    overflow:visible;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
                 }
                 #result-canvas{
                     width:100%;
@@ -519,6 +526,7 @@
                 /* ===== 4: 完成画面：段階演出 ===== */
                 
                 /* 初期状態：全部隠す */
+                .screen--complete .bundle-frame,
                 .screen--complete .complete-copy,
                 .screen--complete .complete-actions{
                     opacity: 0;
@@ -530,6 +538,14 @@
                     filter .9s ease;
                     will-change: opacity, transform, filter;
                 }
+                
+                /* 束だけ先に出す（phase1） */
+                body.mode-complete.complete-phase1 .screen--complete .bundle-frame{
+                    opacity: 1;
+                    transform: none;
+                    filter: blur(0);
+                }
+                
                 /* 文言（copy）を次に出す（phase2） */
                 body.mode-complete.complete-phase2 .screen--complete .complete-copy{
                     opacity: 1;
@@ -3132,10 +3148,8 @@
     function tickResultScene(){
       if (!resRenderer || !resScene || !resCamera) return;
       const t = performance.now() * 0.001;
-      let swing = SWING_AMPLITUDE * Math.sin((2 * Math.PI * t) / SWING_PERIOD);
-      if (resDragging) swing = 0;
       resDragOffset *= DRAG_DAMPING;
-      const az = resBaseAzimuth + swing + resDragOffset;
+      const az = resBaseAzimuth + resDragOffset;
       updateResultCamera(az);
 
       for (const obj of resRoot.children) {
@@ -3197,12 +3211,20 @@
           // ★次フレームで戻す（以後の演出は普通に動く）
           document.body.classList.remove('mode-switching');
 
+          buildResultBundle(result);
+          onResultResize?.();
+
+          const BREATH_MS = 450;
+
           setTimeout(() => {
-            document.body.classList.add('complete-phase2');
+            document.body.classList.add('complete-phase1');
             setTimeout(() => {
-              document.body.classList.add('complete-phase3');
-            }, 420);
-          }, 120);
+              document.body.classList.add('complete-phase2');
+              setTimeout(() => {
+                document.body.classList.add('complete-phase3');
+              }, 420);
+            }, 520);
+          }, BREATH_MS);
         });
       }
 
@@ -3668,8 +3690,15 @@
             return;
           }
 
+          let thumb = "";
+          try{
+            thumb = (resultCanvas && resultCanvas.toDataURL)
+              ? resultCanvas.toDataURL("image/webp", 0.82)
+              : "";
+          }catch(e){ console.warn("thumb生成失敗", e); }
+
           // ✅ ここが「保存確定ポイント」
-          const newId = await saveCurrentBundle(segments, tags);
+          const newId = await saveCurrentBundle(segments, tags, thumb);
           if (!newId){
             alert("保存に失敗しました。ブラウザの設定を確認してください。");
             updateSaveState();
