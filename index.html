@@ -1959,6 +1959,7 @@
     const SUPABASE_ANON_KEY = "sb_publishable_jQC3Na68MxrC7TI8cZPEPw_7OjxHsKF";
     const SUPABASE_TABLE = "timeform_records";
     const ADMIN_PASSCODE_STORAGE_KEY = "timeform_admin_passcode";
+    const OWN_RECORD_IDS_STORAGE_KEY = "timeform_own_record_ids";
     const supabaseClient = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY) || null;
     let recordsCache = [];
     let recordsReady = false;
@@ -2050,6 +2051,44 @@
       }catch(e){
         console.error("TimeForm: 記録の保存に失敗しました", e);
       }
+    }
+
+    function loadOwnRecordIds(){
+      try{
+        const parsed = JSON.parse(localStorage.getItem(OWN_RECORD_IDS_STORAGE_KEY) || "[]");
+        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      }catch(e){
+        return [];
+      }
+    }
+
+    function rememberOwnRecordId(id){
+      if(!id) return;
+      try{
+        const ids = loadOwnRecordIds().filter(x => x !== id);
+        ids.push(id);
+        localStorage.setItem(OWN_RECORD_IDS_STORAGE_KEY, JSON.stringify(ids.slice(-50)));
+      }catch(e){}
+    }
+
+    function findLatestOwnRecord(records){
+      const ids = loadOwnRecordIds();
+      if(!ids.length) return null;
+      const byId = new Map((Array.isArray(records) ? records : []).map(r => [r.id, r]));
+      for(let i = ids.length - 1; i >= 0; i--){
+        const rec = byId.get(ids[i]);
+        if(rec && rec.isPublic === true && !rec.deleted) return rec;
+      }
+      return null;
+    }
+
+    function adoptLatestLocalRecordAsOwnIfNeeded(){
+      if(loadOwnRecordIds().length) return;
+      const local = loadLocalRecords()
+        .slice()
+        .sort((a,b)=> (a.createdAt || a.id || "").localeCompare(b.createdAt || b.id || ""));
+      const latest = local[local.length - 1];
+      if(latest?.id) rememberOwnRecordId(latest.id);
     }
 
     function toDbRecord(record){
@@ -2153,6 +2192,7 @@
 
     async function refreshRecordsFromSupabase(){
       if(!supabaseClient) return loadAllRecords();
+      adoptLatestLocalRecordAsOwnIfNeeded();
 
       const { data, error } = await supabaseClient
         .from(SUPABASE_TABLE)
@@ -2248,6 +2288,7 @@
         const all = loadAllRecords();
         all.push(record);
         saveAllRecords(all);
+        rememberOwnRecordId(record.id);
 
         console.log("TimeForm: 記録を保存しました", record, "現在の件数:", all.length);
 
@@ -2315,11 +2356,15 @@
         setMode('mode-gallery');
         buildPublicGallery();
 
-        // 記録があるなら、既存の showGallery に任せる（最新を表示）
-        if (all && all.length){
-          if (typeof showGallery === 'function'){
-            showGallery(all[all.length - 1].id);
-          }
+        const ownRecord = findLatestOwnRecord(all);
+
+        if (ownRecord && typeof showGallery === 'function'){
+          showGallery(ownRecord.id);
+          return;
+        }
+
+        if (typeof showGalleryOverview === 'function'){
+          showGalleryOverview(all);
           return;
         }
 
@@ -3946,16 +3991,42 @@
         if(yourMetaEl) yourMetaEl.textContent = rec.targetDate || '';
 
         const t = rec.tags || {};
-        if (yourWhereEl) yourWhereEl.textContent = t.where || '';
-        if (yourWhoEl)   yourWhoEl.textContent   = t.who   || '';
-        if (yourWhatEl)  yourWhatEl.textContent  = t.what  || '';
-        if (yourNoteEl)  yourNoteEl.textContent  = t.note  || '';
+        setInfoRow('yourWhereRow', yourWhereEl, t.where || '');
+        setInfoRow('yourWhoRow', yourWhoEl, t.who || '');
+        setInfoRow('yourWhatRow', yourWhatEl, t.what || '');
+        setInfoRow('yourNoteRow', yourNoteEl, t.note || '');
 
         // ★ 描画（モード確定後にやる）
         buildGalleryYourBundle(rec.segments);
         buildRightRailStream(all, currentRecordId);
 
         // ★ レイアウト確定後にresizeを強制（fallback固定を回避）
+        requestAnimationFrame(()=>{
+          onGalleryResize?.();
+          onAllResize?.();
+          onRightStreamResize?.();
+        });
+      }
+
+      function showGalleryOverview(records){
+        const all = Array.isArray(records) ? records : loadAllRecords();
+        currentRecordId = null;
+
+        setMode('mode-gallery');
+
+        if(yourMetaEl) yourMetaEl.textContent = '';
+        setInfoRow('yourWhereRow', yourWhereEl, '');
+        setInfoRow('yourWhoRow', yourWhoEl, '');
+        setInfoRow('yourWhatRow', yourWhatEl, '');
+        setInfoRow('yourNoteRow', yourNoteEl, 'この端末で作った「あなたのかたち」はまだありません');
+
+        initGalleryScene();
+        clearGalleryBundle();
+        galRenderer?.render(galScene, galCamera);
+
+        buildRightRailStream(all, null);
+        buildPublicGallery();
+
         requestAnimationFrame(()=>{
           onGalleryResize?.();
           onAllResize?.();
@@ -4692,16 +4763,9 @@
 
         const all = Array.isArray(records) ? records : [];
 
-        // ✅ 公開だけをプールにする（上限なし）
-        // いったん「あなた以外」を優先（公開が自分だけなら後でフォールバック）
+        // 公開済みのうち、「あなたのかたち」はみんな側には載せない
         let pool = all.filter(r => r && r.isPublic === true && r.id !== excludeId);
 
-        // 公開が「あなたしかない」ケースは、あなた含めて回す
-        if(!pool.length){
-          pool = all.filter(r => r && r.isPublic === true);
-        }
-
-        // それでも0なら空
         pool = pool
           .slice()
           .sort((a,b)=> (b.createdAt || b.id || "").localeCompare(a.createdAt || a.id || ""));
@@ -4715,18 +4779,20 @@
           return;
         }
 
-        // 表示枠は7固定（ただし pool が少ないなら同じものが周回して見えるだけ）
-        rsSlotCount = RS_SLOTS;
+        // 少数時は複製せず、実データの個数だけを流す
+        rsSlotCount = Math.min(RS_SLOTS, rsPoolLen);
 
         // 回転寿司の幾何設定
-        rsStep   = RS_SLOT_H;
+        rsStep   = rsSlotCount < RS_SLOTS
+          ? Math.max(RS_SLOT_H, RS_VIEW_H / rsSlotCount)
+          : RS_SLOT_H;
         rsPeriod = rsStep * rsSlotCount;
         rsScroll = 0;
 
         rsTopY    = RS_VIEW_H/2 - rsStep/2;
         rsBottomY = -rsTopY;
 
-        // 7枠の“スロット”を作る（中身は tick で差し替え）
+        // 実データ数ぶんのスロットを作る（最大7）
         const mid = (rsSlotCount - 1) / 2;
         rsGroups = [];
 
