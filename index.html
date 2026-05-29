@@ -1650,7 +1650,7 @@
           </p>
           <p class="memo-note">
             昨日の時間のかたちに、すこしだけ言葉を結びつけます。<br>
-            ４つのうち、どれかひとつだけでもかまいません。
+            ４つのうち、どれかひとつだけでもかまいません。保存するとギャラリーに公開されます。
           </p>
           <div class="bundle-preview" id="bundleBox">
             <div class="bundle-preview-inner" id="bundlePreview">
@@ -1823,6 +1823,7 @@
 
   <!-- three.js 背景 -->
   <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     /* ===== ゴースト束（背景） ===== */
     const canvas = document.getElementById("bundle-canvas");
@@ -1954,6 +1955,13 @@
 
     // ====== ローカル保存まわり ======
     const STORAGE_KEY = "timeform_records_v1";
+    const SUPABASE_URL = "https://ifthqnhttwyywsffskej.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_jQC3Na68MxrC7TI8cZPEPw_7OjxHsKF";
+    const SUPABASE_TABLE = "timeform_records";
+    const ADMIN_PASSCODE_STORAGE_KEY = "timeform_admin_passcode";
+    const supabaseClient = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY) || null;
+    let recordsCache = [];
+    let recordsReady = false;
     let currentRecordId = null;  // いま編集中のレコードID
 
     function escapeXml(s){
@@ -1993,32 +2001,172 @@
       ctx.closePath();
     }
 
-    function loadAllRecords(){
+    function normalizeRecord(r){
+      if(!r) return null;
+      return {
+        id: r.id,
+        createdAt: r.createdAt || r.created_at || r.id,
+        updatedAt: r.updatedAt || r.updated_at || r.createdAt || r.created_at || r.id,
+        targetDate: r.targetDate || r.target_date || "",
+        segments: Array.isArray(r.segments) ? r.segments : [],
+        tags: r.tags || { where:"", who:"", what:"", note:"" },
+        isPublic: typeof r.isPublic === "boolean" ? r.isPublic : r.is_public !== false,
+        thumb: r.thumb || "",
+        deleted: typeof r.deleted === "boolean" ? r.deleted : r.deleted === true
+      };
+    }
+
+    function normalizeRecords(list){
+      return (Array.isArray(list) ? list : [])
+        .map(normalizeRecord)
+        .filter(r => r && !r.deleted);
+    }
+
+    function loadLocalRecords(){
       try{
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
-        const list = Array.isArray(parsed) ? parsed : [];
-        return list.map(r => ({
-          ...r,
-          updatedAt: r.updatedAt || r.createdAt || r.id,
-          tags: r.tags || { where:"", who:"", what:"", note:"" },
-          isPublic: typeof r.isPublic === "boolean" ? r.isPublic : false,
-          thumb: r.thumb || "",
-          deleted: typeof r.deleted === "boolean" ? r.deleted : false
-        })).filter(r => !r.deleted);
+        return normalizeRecords(parsed);
       }catch(e){
         console.error("TimeForm: 記録の読み込みに失敗しました", e);
         return [];
       }
     }
 
+    function loadAllRecords(){
+      if(!recordsReady){
+        recordsCache = loadLocalRecords();
+        recordsReady = true;
+      }
+      return recordsCache.slice();
+    }
+
     function saveAllRecords(list){
       try{
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        recordsCache = normalizeRecords(list);
+        recordsReady = true;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(recordsCache));
       }catch(e){
         console.error("TimeForm: 記録の保存に失敗しました", e);
       }
+    }
+
+    function toDbRecord(record){
+      return {
+        id: record.id,
+        created_at: record.createdAt,
+        updated_at: record.updatedAt,
+        target_date: record.targetDate,
+        segments: record.segments,
+        tags: record.tags,
+        is_public: record.isPublic !== false,
+        thumb: record.thumb || "",
+        deleted: record.deleted === true
+      };
+    }
+
+    function toDbPatch(patch){
+      const dbPatch = { updated_at: new Date().toISOString() };
+      if(Object.prototype.hasOwnProperty.call(patch, "targetDate")) dbPatch.target_date = patch.targetDate;
+      if(Object.prototype.hasOwnProperty.call(patch, "segments")) dbPatch.segments = patch.segments;
+      if(Object.prototype.hasOwnProperty.call(patch, "tags")) dbPatch.tags = patch.tags;
+      if(Object.prototype.hasOwnProperty.call(patch, "isPublic")) dbPatch.is_public = patch.isPublic;
+      if(Object.prototype.hasOwnProperty.call(patch, "thumb")) dbPatch.thumb = patch.thumb || "";
+      if(Object.prototype.hasOwnProperty.call(patch, "deleted")) dbPatch.deleted = patch.deleted === true;
+      return dbPatch;
+    }
+
+    function getAdminPasscode(forcePrompt = false){
+      let passcode = "";
+      try{
+        passcode = sessionStorage.getItem(ADMIN_PASSCODE_STORAGE_KEY) || "";
+      }catch(e){}
+
+      if(forcePrompt || !passcode){
+        passcode = prompt("管理パスコード") || "";
+        if(passcode){
+          try{ sessionStorage.setItem(ADMIN_PASSCODE_STORAGE_KEY, passcode); }catch(e){}
+        }
+      }
+
+      return passcode;
+    }
+
+    async function adminRequest(options = {}){
+      const passcode = getAdminPasscode(options.forcePrompt === true);
+      if(!passcode) throw new Error("管理パスコードが必要です。");
+
+      const response = await fetch("/api/admin-records", {
+        method: options.method || "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-passcode": passcode
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if(response.status === 401 && options.forcePrompt !== true){
+        try{ sessionStorage.removeItem(ADMIN_PASSCODE_STORAGE_KEY); }catch(e){}
+        return adminRequest({ ...options, forcePrompt: true });
+      }
+
+      if(!response.ok){
+        throw new Error(data.error || "管理操作に失敗しました。");
+      }
+
+      return data;
+    }
+
+    async function loadAdminRecords(){
+      const data = await adminRequest();
+      const records = normalizeRecords(data.records);
+      const publicCache = records.filter(r => r.isPublic === true);
+      saveAllRecords(publicCache);
+      return records;
+    }
+
+    async function adminUpdateRecord(id, patch){
+      const data = await adminRequest({
+        method: "PATCH",
+        body: { id, patch }
+      });
+      const record = normalizeRecord(data.record);
+      if(record){
+        const all = loadAllRecords().filter(r => r.id !== id);
+        if(record.isPublic && !record.deleted) all.push(record);
+        saveAllRecords(all);
+      }
+      return record;
+    }
+
+    async function adminDeleteRecord(id){
+      const data = await adminRequest({
+        method: "DELETE",
+        body: { id }
+      });
+      deleteRecord(id);
+      return normalizeRecord(data.record);
+    }
+
+    async function refreshRecordsFromSupabase(){
+      if(!supabaseClient) return loadAllRecords();
+
+      const { data, error } = await supabaseClient
+        .from(SUPABASE_TABLE)
+        .select("*")
+        .eq("deleted", false)
+        .order("created_at", { ascending: true });
+
+      if(error){
+        console.warn("TimeForm: Supabaseからの読み込みに失敗しました", error);
+        return loadAllRecords();
+      }
+
+      saveAllRecords(normalizeRecords(data));
+      return loadAllRecords();
     }
       
       function updateRecord(id, patch){
@@ -2031,14 +2179,43 @@
         return next;
       }
 
+      async function updateRecordRemote(id, patch){
+        const next = updateRecord(id, patch);
+        if(!next || !supabaseClient) return next;
+
+        const { error } = await supabaseClient
+          .from(SUPABASE_TABLE)
+          .update(toDbPatch(patch))
+          .eq("id", id);
+
+        if(error){
+          console.warn("TimeForm: Supabaseの更新に失敗しました", error);
+        }
+        return next;
+      }
+
       function deleteRecord(id){
         const all = loadAllRecords();
         const next = all.filter(r => r.id !== id); // 物理削除
         saveAllRecords(next);
       }
 
+      async function deleteRecordRemote(id){
+        deleteRecord(id);
+        if(!supabaseClient) return;
+
+        const { error } = await supabaseClient
+          .from(SUPABASE_TABLE)
+          .update({ deleted: true, updated_at: new Date().toISOString() })
+          .eq("id", id);
+
+        if(error){
+          console.warn("TimeForm: Supabaseの削除に失敗しました", error);
+        }
+      }
+
       // ✅ tags込みで「このタイミングで」1件保存する（＝保存確定ポイント）
-      function saveCurrentBundleToLocal(segments, tags){
+      async function saveCurrentBundle(segments, tags, thumb = ""){
         if (!Array.isArray(segments) || segments.length === 0){
           console.warn("TimeForm: 保存できる束がありません");
           return null;
@@ -2063,8 +2240,8 @@
             what:  tags?.what  ?? "",
             note:  tags?.note  ?? ""
           },
-          isPublic: false,
-          thumb: "",      // DataURL想定（後で生成）
+          isPublic: true,
+          thumb: thumb || "",
           deleted: false  // 使わないなら消してもOK
         };
 
@@ -2073,8 +2250,23 @@
         saveAllRecords(all);
 
         console.log("TimeForm: 記録を保存しました", record, "現在の件数:", all.length);
+
+        if(supabaseClient){
+          const { error } = await supabaseClient
+            .from(SUPABASE_TABLE)
+            .insert(toDbRecord(record));
+
+          if(error){
+            console.warn("TimeForm: Supabaseへの保存に失敗しました。ローカルにだけ保存されています。", error);
+          }
+        }
+
         return record.id;
       }
+
+      refreshRecordsFromSupabase().then(() => {
+        buildPublicGallery?.();
+      });
 
     // 画面モード
     const bgCanvas = document.getElementById('bundle-canvas');
@@ -2112,8 +2304,10 @@
 
     // イントロ → ギャラリー直行
     document.getElementById('btn-open-gallery')
-      ?.addEventListener('click', () => {
-        const all = (typeof loadAllRecords === 'function') ? loadAllRecords() : [];
+      ?.addEventListener('click', async () => {
+        const all = (typeof refreshRecordsFromSupabase === 'function')
+          ? await refreshRecordsFromSupabase()
+          : ((typeof loadAllRecords === 'function') ? loadAllRecords() : []);
 
         // まずギャラリー画面へ
         setMode('mode-gallery');
@@ -3405,9 +3599,10 @@
         form.addEventListener('input', updateSaveState);
         updateSaveState();
 
-        form.addEventListener('submit', (e) => {
+        form.addEventListener('submit', async (e) => {
           e.preventDefault();
           if (btnSave.disabled) return;
+          btnSave.disabled = true;
 
           const tags = {
             where: form.elements['where'].value.trim(),
@@ -3427,22 +3622,24 @@
             return;
           }
 
+          let thumb = "";
+          try{
+            thumb = (resultCanvas && resultCanvas.toDataURL)
+              ? resultCanvas.toDataURL("image/webp", 0.82)
+              : "";
+          }catch(e){ console.warn("thumb生成失敗", e); }
+
           // ✅ ここが「保存確定ポイント」
-          const newId = saveCurrentBundleToLocal(segments, tags);
+          const newId = await saveCurrentBundle(segments, tags, thumb);
           if (!newId){
             alert("保存に失敗しました。ブラウザの設定を確認してください。");
+            updateSaveState();
             return;
           }
 
           currentRecordId = newId;
-          // ★ サムネ生成（結果キャンバスがあれば）
-          try{
-            const thumb = (resultCanvas && resultCanvas.toDataURL)
-              ? resultCanvas.toDataURL("image/webp", 0.82)
-              : "";
-            if(thumb) updateRecord(newId, { thumb });
-          }catch(e){ console.warn("thumb生成失敗", e); }
           showGallery(newId);
+          updateSaveState();
         });
       }
 
@@ -3766,13 +3963,21 @@
         });
       }
       
-      function renderAdmin(){
+      async function renderAdmin(){
         const body = document.getElementById("adminBody");
         if(!body) return;
 
-        const all = loadAllRecords()
-          .slice()
-          .sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
+        body.innerHTML = `<tr><td colspan="5" style="opacity:.7;">読み込み中...</td></tr>`;
+
+        let all = [];
+        try{
+          all = await loadAdminRecords();
+        }catch(e){
+          body.innerHTML = `<tr><td colspan="5" style="opacity:.7;">${escapeXml(e.message || "管理データを読み込めませんでした。")}</td></tr>`;
+          return;
+        }
+
+        all = all.slice().sort((a,b)=> (b.createdAt||"").localeCompare(a.createdAt||""));
 
         body.innerHTML = "";
 
@@ -3850,8 +4055,8 @@
           const cb = document.createElement("input");
           cb.type = "checkbox";
           cb.checked = rec.isPublic === true;
-          cb.addEventListener("change", ()=>{
-            updateRecord(rec.id, { isPublic: cb.checked });
+          cb.addEventListener("change", async ()=>{
+            await adminUpdateRecord(rec.id, { isPublic: cb.checked });
             buildPublicGallery(); // 公開一覧を同期
           });
           td3.appendChild(cb);
@@ -3865,14 +4070,14 @@
           const btnEdit = document.createElement("button");
           btnEdit.className = "btn";
           btnEdit.textContent = "断片メモ編集";
-          btnEdit.addEventListener("click", ()=>{
+          btnEdit.addEventListener("click", async ()=>{
             const where = prompt("どこ", t.where||""); if(where === null) return;
             const who   = prompt("だれ", t.who||"");   if(who === null) return;
             const what  = prompt("なに", t.what||"");  if(what === null) return;
             const note  = prompt("一言", t.note||"");  if(note === null) return;
 
-            updateRecord(rec.id, { tags: { where, who, what, note } });
-            renderAdmin();
+            await adminUpdateRecord(rec.id, { tags: { where, who, what, note } });
+            await renderAdmin();
             buildPublicGallery();
             if(currentRecordId === rec.id) showGallery(rec.id);
           });
@@ -3881,10 +4086,10 @@
           const btnDel = document.createElement("button");
           btnDel.className = "btn";
           btnDel.textContent = "保存データ削除";
-          btnDel.addEventListener("click", ()=>{
+          btnDel.addEventListener("click", async ()=>{
             if(!confirm("削除します。戻せません。OK？")) return;
-            deleteRecord(rec.id);
-            renderAdmin();
+            await adminDeleteRecord(rec.id);
+            await renderAdmin();
             buildPublicGallery();
           });
 
@@ -3954,7 +4159,7 @@
         let n = 0;
         let timer = null;
 
-        egg.addEventListener("click", ()=>{
+        egg.addEventListener("click", async ()=>{
           n++;
           clearTimeout(timer);
           timer = setTimeout(()=>{ n = 0; }, 1200);
@@ -3963,7 +4168,7 @@
             n = 0;
             clearTimeout(timer);
             setMode("mode-admin");
-            renderAdmin?.(); // 後で作る
+            await renderAdmin?.();
           }
         });
       })();
