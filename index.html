@@ -1467,6 +1467,186 @@
                 }
                 .adminMiniBtn:hover{ border-color: rgba(255,255,255,.38); }
 
+                /* =========================
+                   Gallery polish: spacing + quiet controls
+                   ========================= */
+
+                body.mode-gallery{
+                  overflow: hidden;
+                }
+
+                body.mode-gallery .screen--gallery{
+                  overflow: hidden;
+                }
+
+                body.mode-gallery{
+                  --topbar-h: 96px;
+                  --shell-max: 1480px;
+                  --shell-pad-x: clamp(28px, 4vw, 56px);
+                  --shell-pad-top: 22px;
+                  --shell-pad-bottom: 22px;
+                  --rail-w: 240px;
+                  --rail-gap: 30px;
+                  --left-col: 220px;
+                }
+
+                .gallery-topbar{
+                  height: var(--topbar-h) !important;
+                  padding: 0 var(--shell-pad-x) 18px !important;
+                  background: rgba(0,0,0,.24) !important;
+                  border-bottom: 1px solid rgba(255,255,255,.08) !important;
+                  backdrop-filter: blur(10px);
+                }
+
+                .topbar-title{
+                  font-size: 30px;
+                  line-height: 1.25;
+                  font-weight: 300;
+                  letter-spacing: .04em;
+                  color: rgba(255,255,255,.92);
+                  text-shadow: 0 0 18px rgba(0,0,0,.85), 0 0 36px rgba(0,0,0,.70);
+                }
+
+                .topbar-ctl{
+                  display:flex;
+                  align-items:center;
+                  justify-content:flex-end;
+                  gap: 8px;
+                }
+
+                .topbar-btn{
+                  height: 34px;
+                  min-width: 112px;
+                  padding: 0 14px;
+                  border-radius: 999px;
+                  border: 1px solid rgba(255,255,255,.20);
+                  background: rgba(255,255,255,.075);
+                  color: rgba(255,255,255,.76);
+                  font-size: 12px;
+                  font-weight: 400;
+                  letter-spacing: .02em;
+                  white-space: nowrap;
+                  cursor: pointer;
+                  box-shadow: none;
+                  transition: background .16s ease, border-color .16s ease, color .16s ease;
+                }
+
+                .topbar-btn:hover{
+                  background: rgba(255,255,255,.12);
+                  border-color: rgba(255,255,255,.30);
+                  color: rgba(255,255,255,.92);
+                }
+
+                .topbar-btn[aria-pressed="true"]{
+                  background: rgba(255,255,255,.13);
+                  border-color: rgba(255,255,255,.32);
+                  color: rgba(255,255,255,.90);
+                }
+
+                .gallery-shell{
+                  width: min(var(--shell-max), 100%) !important;
+                  height: calc(100vh - var(--topbar-h)) !important;
+                  min-height: 0 !important;
+                  margin: 0 auto !important;
+                  padding: var(--shell-pad-top) var(--shell-pad-x) var(--shell-pad-bottom) !important;
+                  display: grid !important;
+                  grid-template-columns: minmax(0, 1fr) var(--rail-w) !important;
+                  column-gap: var(--rail-gap) !important;
+                  align-items: center !important;
+                  overflow: hidden !important;
+                }
+
+                .g-stack{
+                  align-self: center !important;
+                  gap: clamp(18px, 3vh, 26px) !important;
+                  min-height: 0;
+                }
+
+                .g-block{
+                  grid-template-columns: var(--left-col) minmax(0, 1fr) !important;
+                  gap: clamp(22px, 3vw, 34px) !important;
+                }
+
+                .g-divider{
+                  opacity: .38 !important;
+                }
+
+                .g-head{
+                  margin-bottom: 12px !important;
+                }
+
+                .g-label,
+                .g-meta,
+                .g-line{
+                  letter-spacing: .03em !important;
+                }
+
+                .g-stage{
+                  min-height: clamp(168px, 22vh, 240px) !important;
+                  max-height: clamp(188px, 25vh, 280px) !important;
+                  border-radius: 10px !important;
+                }
+
+                .g-stage--big{
+                  min-height: clamp(176px, 23vh, 250px) !important;
+                  max-height: clamp(196px, 26vh, 292px) !important;
+                }
+
+                .right-rail{
+                  align-self: stretch;
+                  min-height: 0;
+                }
+
+                @media (max-width: 960px){
+                  body.mode-gallery{
+                    overflow: auto;
+                    --topbar-h: 86px;
+                    --shell-pad-x: 20px;
+                    --shell-pad-top: 18px;
+                    --shell-pad-bottom: 22px;
+                    --rail-w: 100%;
+                    --rail-gap: 18px;
+                    --left-col: 1fr;
+                  }
+
+                  body.mode-gallery .screen--gallery{
+                    overflow: auto;
+                  }
+
+                  .gallery-topbar{
+                    align-items:flex-end !important;
+                    gap: 14px;
+                  }
+
+                  .topbar-title{
+                    font-size: 24px;
+                  }
+
+                  .topbar-btn{
+                    min-width: 96px;
+                    height: 32px;
+                    padding: 0 12px;
+                  }
+
+                  .gallery-shell{
+                    height: auto !important;
+                    min-height: calc(100vh - var(--topbar-h)) !important;
+                    grid-template-columns: 1fr !important;
+                    row-gap: var(--rail-gap) !important;
+                    overflow: visible !important;
+                  }
+
+                  .g-block{
+                    grid-template-columns: 1fr !important;
+                  }
+
+                  .g-stage,
+                  .g-stage--big{
+                    min-height: 190px !important;
+                    max-height: 240px !important;
+                  }
+                }
+
             </style>
     </head>
 <body class="mode-intro">
@@ -1772,7 +1952,7 @@
     <header class="gallery-topbar">
       <div class="topbar-title">時間のかたちギャラリー</div>
       <div class="topbar-ctl">
-        <button class="topbar-btn" id="btnAuto" type="button" aria-pressed="true">オート ON</button>
+        <button class="topbar-btn" id="btnAuto" type="button" aria-pressed="true">自動再生 ON</button>
         <button class="topbar-btn" id="btnBackToIntro" type="button">はじめから</button>
       </div>
     </header>
@@ -3803,7 +3983,7 @@
         const btnAuto = document.getElementById('btnAuto');
         if(btnAuto){
           btnAuto.setAttribute('aria-pressed', String(autoOn));
-          btnAuto.textContent = autoOn ? 'オート ON' : 'オート OFF';
+          btnAuto.textContent = autoOn ? '自動再生 ON' : '自動再生 OFF';
         }
       }
 
