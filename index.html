@@ -271,19 +271,12 @@
                     display:flex;
                     flex-direction:column;
                     align-items:center;
-                    gap:32px;
+                    justify-content:center;
+                    gap:24px;
+                    min-height:58vh;
                 }
                 .bundle-frame{
-                    width:100%;
-                    max-width:none;
-                    height: min(70vh, 520px);
-                    border-radius:0;
-                    background:transparent;
-                    box-shadow:none;
-                    overflow:visible;
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
+                    display:none !important;
                 }
                 #result-canvas{
                     width:100%;
@@ -526,7 +519,6 @@
                 /* ===== 4: 完成画面：段階演出 ===== */
                 
                 /* 初期状態：全部隠す */
-                .screen--complete .bundle-frame,
                 .screen--complete .complete-copy,
                 .screen--complete .complete-actions{
                     opacity: 0;
@@ -538,14 +530,6 @@
                     filter .9s ease;
                     will-change: opacity, transform, filter;
                 }
-                
-                /* 束だけ先に出す（phase1） */
-                body.mode-complete.complete-phase1 .screen--complete .bundle-frame{
-                    opacity: 1;
-                    transform: none;
-                    filter: blur(0);
-                }
-                
                 /* 文言（copy）を次に出す（phase2） */
                 body.mode-complete.complete-phase2 .screen--complete .complete-copy{
                     opacity: 1;
@@ -3213,20 +3197,12 @@
           // ★次フレームで戻す（以後の演出は普通に動く）
           document.body.classList.remove('mode-switching');
 
-          buildResultBundle(result);
-          onResultResize?.();
-
-          const BREATH_MS = 450;
-
           setTimeout(() => {
-            document.body.classList.add('complete-phase1');
+            document.body.classList.add('complete-phase2');
             setTimeout(() => {
-              document.body.classList.add('complete-phase2');
-              setTimeout(() => {
-                document.body.classList.add('complete-phase3');
-              }, 420);
-            }, 520);
-          }, BREATH_MS);
+              document.body.classList.add('complete-phase3');
+            }, 420);
+          }, 120);
         });
       }
 
@@ -3692,15 +3668,8 @@
             return;
           }
 
-          let thumb = "";
-          try{
-            thumb = (resultCanvas && resultCanvas.toDataURL)
-              ? resultCanvas.toDataURL("image/webp", 0.82)
-              : "";
-          }catch(e){ console.warn("thumb生成失敗", e); }
-
           // ✅ ここが「保存確定ポイント」
-          const newId = await saveCurrentBundle(segments, tags, thumb);
+          const newId = await saveCurrentBundle(segments, tags);
           if (!newId){
             alert("保存に失敗しました。ブラウザの設定を確認してください。");
             updateSaveState();
